@@ -175,15 +175,17 @@ func addPageParam(baseURL string, page int) string {
 }
 
 func buildURL(query string, category string) string {
+	// Si l'utilisateur tape un texte, c'est ce texte précis qu'on cherche en priorité !
+	if query != "" {
+		return fmt.Sprintf("https://www.tunisianet.com.tn/recherche?controller=search&s=%s", url.QueryEscape(query))
+	}
+
+	// Sinon, s'il n'y a pas de texte mais une catégorie, on charge l'URL de la catégorie
 	if category != "" {
 		if catURL, ok := categories[category]; ok {
 			return catURL
 		}
 		return fmt.Sprintf("https://www.tunisianet.com.tn/recherche?controller=search&s=%s", url.QueryEscape(category))
-	}
-
-	if query != "" {
-		return fmt.Sprintf("https://www.tunisianet.com.tn/recherche?controller=search&s=%s", url.QueryEscape(query))
 	}
 
 	return "https://www.tunisianet.com.tn/recherche?controller=search&s=informatique"
