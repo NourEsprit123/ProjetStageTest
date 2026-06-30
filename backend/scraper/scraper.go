@@ -19,23 +19,10 @@ import (
 // IMPORTANT : ces URLs doivent être vérifiées une par une en naviguant sur
 // https://www.tunisianet.com.tn (menu "Toutes nos catégories"), puis en copiant
 // l'URL exacte affichée dans la barre d'adresse pour chaque catégorie.
-// Les ID numériques Tunisianet ne suivent aucun schéma prévisible.
 var categories = map[string]string{
 	"informatique":         "https://www.tunisianet.com.tn/301-informatique",         // confirmé OK
 	"smartphones":          "https://www.tunisianet.com.tn/596-smartphone-tunisie",    // confirmé OK
 	"telephonie portables": "https://www.tunisianet.com.tn/377-telephone-portable-tunisie", // confirmé OK
-
-	// ⚠️ À VÉRIFIER MANUELLEMENT — probablement incorrectes, retirées du mapping
-	// pour éviter les pages 404 silencieuses. Une fois vérifiées, remets-les ici.
-	// "composants":             "https://www.tunisianet.com.tn/226-composants",
-	// "ordinateurs":            "https://www.tunisianet.com.tn/228-ordinateurs",
-	// "reseaux":                "https://www.tunisianet.com.tn/235-reseaux-et-connectivite",
-	// "peripheriques":          "https://www.tunisianet.com.tn/234-peripheriques",
-	// "stockage":               "https://www.tunisianet.com.tn/233-stockages",
-	// "accessoires telephonie": "https://www.tunisianet.com.tn/accessoires-telephonie",
-	// "telephones fixes":       "https://www.tunisianet.com.tn/telephones-fixes",
-	// "smartwatch":             "https://www.tunisianet.com.tn/smartwatch",
-	// "electromenager":         "https://www.tunisianet.com.tn/303-electromenager",
 }
 
 func getHTTPClient() *http.Client {
@@ -56,42 +43,56 @@ func getHTTPClient() *http.Client {
 	}
 }
 
-// ScrapeProducts récupère jusqu'à maxPages pages de résultats (24 produits/page environ).
-// maxPages=0 ou 1 => comportement identique à avant (une seule page).
+// ScrapeProducts récupère TOUTES les pages de résultats disponibles de manière dynamique.
 func ScrapeProducts(query string, category string) ([]models.Product, error) {
-	const maxPages = 5 // ajuste selon le nombre de produits que tu veux récupérer
-
 	var allProducts []models.Product
 	baseURL := buildURL(query, category)
-
 	client := getHTTPClient()
 
-	for page := 1; page <= maxPages; page++ {
+	page := 1
+	for {
 		pageURL := addPageParam(baseURL, page)
-		fmt.Println("Scraping URL:", pageURL)
+		fmt.Printf("📥 [Tunisianet] Scraping Page %d: %s\n", page, pageURL)
 
-		products, err := scrapePage(client, pageURL, category)
+		products, htmlDoc, err := scrapePageWithDoc(client, pageURL, category)
 		if err != nil {
-			return allProducts, err
+			// En cas d'erreur sur une page (ex: 404), on renvoie ce qu'on a déjà pour ne pas tout perdre
+			fmt.Printf("⚠️ [Tunisianet] Arrêt ou erreur à la page %d: %v\n", page, err)
+			return allProducts, nil
 		}
 
+		// Si la page ne contient aucun produit, on arrête la pagination
 		if len(products) == 0 {
-			// Plus de produits => on a atteint la dernière page, on arrête.
+			fmt.Printf("🏁 [Tunisianet] Plus de produits trouvés. Fin à la page %d.\n", page)
 			break
 		}
 
 		allProducts = append(allProducts, products...)
+
+		// 🔍 CONDITION D'ARRÊT : On vérifie si le bouton "Suivant" est présent sur la page.
+		// PrestaShop utilise généralement la classe 'a.next' ou l'attribut 'rel="next"'
+		hasNextPage := htmlDoc.Find("a.next, a[rel='next']").Length() > 0
+		if !hasNextPage {
+			fmt.Printf("🏁 [Tunisianet] Fin du catalogue atteinte naturellement à la page %d.\n", page)
+			break
+		}
+
+		page++
+		
+		// Pause de sécurité pour éviter d'être bloqué par le serveur
+		time.Sleep(300 * time.Millisecond)
 	}
 
 	return allProducts, nil
 }
 
-func scrapePage(client *http.Client, pageURL string, category string) ([]models.Product, error) {
+// scrapePageWithDoc effectue la requête et extrait les données tout en retournant le document HTML complet pour analyse.
+func scrapePageWithDoc(client *http.Client, pageURL string, category string) ([]models.Product, *goquery.Document, error) {
 	var products []models.Product
 
 	req, err := http.NewRequest("GET", pageURL, nil)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
@@ -104,7 +105,7 @@ func scrapePage(client *http.Client, pageURL string, category string) ([]models.
 
 	resp, err := client.Do(req)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	defer resp.Body.Close()
 
@@ -112,7 +113,7 @@ func scrapePage(client *http.Client, pageURL string, category string) ([]models.
 	if resp.Header.Get("Content-Encoding") == "gzip" {
 		gzReader, err := gzip.NewReader(resp.Body)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		defer gzReader.Close()
 		reader = gzReader
@@ -122,15 +123,15 @@ func scrapePage(client *http.Client, pageURL string, category string) ([]models.
 
 	doc, err := goquery.NewDocumentFromReader(reader)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
-	// DEBUG TEMPORAIRE — à retirer une fois le diagnostic terminé
+	// Code de débug original conservé
 	debugHTML, _ := doc.Html()
 	os.WriteFile("debug_page.html", []byte(debugHTML), 0644)
-	fmt.Println("Taille HTML reçu:", len(debugHTML), "octets")
-	fmt.Println("Nombre d'articles 'article.product-miniature' trouvés:", doc.Find("article.product-miniature").Length())
-	fmt.Println("Titre de la page <title>:", strings.TrimSpace(doc.Find("title").Text()))
+	fmt.Println("[Tunisianet Debug] Taille HTML reçu:", len(debugHTML), "octets")
+	fmt.Println("[Tunisianet Debug] Articles 'article.product-miniature' trouvés:", doc.Find("article.product-miniature").Length())
+	fmt.Println("[Tunisianet Debug] Titre de la page <title>:", strings.TrimSpace(doc.Find("title").Text()))
 
 	doc.Find("article.product-miniature").Each(func(i int, s *goquery.Selection) {
 		product := models.Product{}
@@ -147,12 +148,15 @@ func scrapePage(client *http.Client, pageURL string, category string) ([]models.
 		product.Price = strings.TrimSpace(s.Find(".price").First().Text())
 		product.Category = category
 
+		// Vérification basique de la disponibilité dans le DOM (optionnel selon le thème)
+		product.InStock = !strings.Contains(strings.ToLower(s.Text()), "hors stock")
+
 		if product.Name != "" {
 			products = append(products, product)
 		}
 	})
 
-	return products, nil
+	return products, doc, nil
 }
 
 // addPageParam ajoute ou met à jour le paramètre "page" dans l'URL.

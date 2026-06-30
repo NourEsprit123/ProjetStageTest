@@ -15,3 +15,5 @@ type SearchRequest struct {
 	Query    string `json:"query"`
 	Category string `json:"category"`
 }
+
+
