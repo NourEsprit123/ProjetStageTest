@@ -14,12 +14,15 @@ interface Product {
   in_stock: boolean;
 }
 
+const PRODUCTS_PER_PAGE = 24;
+
 export default function Home() {
   const [search, setSearch] = useState('');
   const [category, setCategory] = useState('');
   const [products, setProducts] = useState<Product[]>([]);
   const [loading, setLoading] = useState(false);
   const [searched, setSearched] = useState(false);
+  const [currentPage, setCurrentPage] = useState(1);
   const router = useRouter();
 
   const categories = [
@@ -52,6 +55,7 @@ export default function Home() {
     if (!search && !category) return;
     setLoading(true);
     setSearched(true);
+    setCurrentPage(1); // reset à la page 1 à chaque nouvelle recherche
     try {
       const params = new URLSearchParams();
       if (search) params.append('search', search);
@@ -64,6 +68,39 @@ export default function Home() {
     } finally {
       setLoading(false);
     }
+  };
+
+  const totalPages = Math.ceil(products.length / PRODUCTS_PER_PAGE);
+  const paginatedProducts = products.slice(
+    (currentPage - 1) * PRODUCTS_PER_PAGE,
+    currentPage * PRODUCTS_PER_PAGE
+  );
+
+  const goToPage = (page: number) => {
+    setCurrentPage(page);
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
+
+  // Génère une liste de numéros de page avec "..." si trop de pages
+  const getPageNumbers = () => {
+    const pages: (number | string)[] = [];
+    const maxVisible = 5;
+
+    if (totalPages <= maxVisible + 2) {
+      for (let i = 1; i <= totalPages; i++) pages.push(i);
+      return pages;
+    }
+
+    pages.push(1);
+    let start = Math.max(2, currentPage - 1);
+    let end = Math.min(totalPages - 1, currentPage + 1);
+
+    if (start > 2) pages.push('...');
+    for (let i = start; i <= end; i++) pages.push(i);
+    if (end < totalPages - 1) pages.push('...');
+
+    pages.push(totalPages);
+    return pages;
   };
 
   return (
@@ -126,9 +163,11 @@ export default function Home() {
 
           {!loading && products.length > 0 && (
             <>
-              <p className="text-gray-600 mb-4">{products.length} produits trouvés</p>
+              <p className="text-gray-600 mb-4">
+                {products.length} produits trouvés — page {currentPage} sur {totalPages}
+              </p>
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
-                {products.map((product) => (
+                {paginatedProducts.map((product) => (
                   <div
                     key={product.id}
                     onClick={() => router.push(`/product/${product.id}?search=${search}&category=${category}`)}
@@ -150,6 +189,47 @@ export default function Home() {
                   </div>
                 ))}
               </div>
+
+              {/* Pagination Controls */}
+              {totalPages > 1 && (
+                <div className="flex justify-center items-center gap-2 mt-8 flex-wrap">
+                  <button
+                    onClick={() => goToPage(currentPage - 1)}
+                    disabled={currentPage === 1}
+                    className="px-4 py-2 rounded-lg border border-gray-300 disabled:opacity-40 disabled:cursor-not-allowed hover:bg-gray-100"
+                  >
+                    ← Précédent
+                  </button>
+
+                  {getPageNumbers().map((p, idx) =>
+                    p === '...' ? (
+                      <span key={`dots-${idx}`} className="px-2 text-gray-400">
+                        …
+                      </span>
+                    ) : (
+                      <button
+                        key={p}
+                        onClick={() => goToPage(p as number)}
+                        className={`px-4 py-2 rounded-lg border ${
+                          currentPage === p
+                            ? 'bg-blue-700 text-white border-blue-700'
+                            : 'border-gray-300 hover:bg-gray-100'
+                        }`}
+                      >
+                        {p}
+                      </button>
+                    )
+                  )}
+
+                  <button
+                    onClick={() => goToPage(currentPage + 1)}
+                    disabled={currentPage === totalPages}
+                    className="px-4 py-2 rounded-lg border border-gray-300 disabled:opacity-40 disabled:cursor-not-allowed hover:bg-gray-100"
+                  >
+                    Suivant →
+                  </button>
+                </div>
+              )}
             </>
           )}
         </div>

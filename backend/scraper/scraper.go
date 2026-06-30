@@ -7,6 +7,8 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"net/url"
+	"os"
 	"strings"
 	"time"
 
@@ -15,15 +17,18 @@ import (
 )
 
 var categories = map[string]string{
-	"informatique":   "https://www.tunisianet.com.tn/301-informatique",
-	"composants":     "https://www.tunisianet.com.tn/226-composants",
-	"ordinateurs":    "https://www.tunisianet.com.tn/228-ordinateurs",
-	"reseaux":        "https://www.tunisianet.com.tn/235-reseaux-et-connectivite",
-	"peripheriques":  "https://www.tunisianet.com.tn/234-peripheriques",
-	"stockage":       "https://www.tunisianet.com.tn/233-stockages",
-	"telephonie":     "https://www.tunisianet.com.tn/302-telephonie",
-	"smartphones":    "https://www.tunisianet.com.tn/286-smartphones",
-	"electromenager": "https://www.tunisianet.com.tn/303-electromenager",
+	"informatique":           "https://www.tunisianet.com.tn/301-informatique",
+	"composants":             "https://www.tunisianet.com.tn/226-composants",
+	"ordinateurs":            "https://www.tunisianet.com.tn/228-ordinateurs",
+	"reseaux":                "https://www.tunisianet.com.tn/235-reseaux-et-connectivite",
+	"peripheriques":          "https://www.tunisianet.com.tn/234-peripheriques",
+	"stockage":               "https://www.tunisianet.com.tn/233-stockages",
+	"telephonie portables":   "https://www.tunisianet.com.tn/302-telephonie",
+	"smartphones":            "https://www.tunisianet.com.tn/286-smartphones",
+	"accessoires telephonie": "https://www.tunisianet.com.tn/accessoires-telephonie",
+	"telephones fixes":       "https://www.tunisianet.com.tn/telephones-fixes",
+	"smartwatch":             "https://www.tunisianet.com.tn/smartwatch",
+	"electromenager":         "https://www.tunisianet.com.tn/303-electromenager",
 }
 
 func getHTTPClient() *http.Client {
@@ -44,14 +49,40 @@ func getHTTPClient() *http.Client {
 	}
 }
 
+// ScrapeProducts récupère jusqu'à maxPages pages de résultats (24 produits/page environ).
+// maxPages=0 ou 1 => comportement identique à avant (une seule page).
 func ScrapeProducts(query string, category string) ([]models.Product, error) {
-	var products []models.Product
+	const maxPages = 5 // ajuste selon le nombre de produits que tu veux récupérer
 
-	url := buildURL(query, category)
-	fmt.Println("Scraping URL:", url)
+	var allProducts []models.Product
+	baseURL := buildURL(query, category)
 
 	client := getHTTPClient()
-	req, err := http.NewRequest("GET", url, nil)
+
+	for page := 1; page <= maxPages; page++ {
+		pageURL := addPageParam(baseURL, page)
+		fmt.Println("Scraping URL:", pageURL)
+
+		products, err := scrapePage(client, pageURL, category)
+		if err != nil {
+			return allProducts, err
+		}
+
+		if len(products) == 0 {
+			// Plus de produits => on a atteint la dernière page, on arrête.
+			break
+		}
+
+		allProducts = append(allProducts, products...)
+	}
+
+	return allProducts, nil
+}
+
+func scrapePage(client *http.Client, pageURL string, category string) ([]models.Product, error) {
+	var products []models.Product
+
+	req, err := http.NewRequest("GET", pageURL, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -70,7 +101,6 @@ func ScrapeProducts(query string, category string) ([]models.Product, error) {
 	}
 	defer resp.Body.Close()
 
-	// Gérer la compression gzip
 	var reader io.Reader
 	if resp.Header.Get("Content-Encoding") == "gzip" {
 		gzReader, err := gzip.NewReader(resp.Body)
@@ -88,42 +118,63 @@ func ScrapeProducts(query string, category string) ([]models.Product, error) {
 		return nil, err
 	}
 
+	// DEBUG TEMPORAIRE — à retirer une fois le diagnostic terminé
+	debugHTML, _ := doc.Html()
+	os.WriteFile("debug_page.html", []byte(debugHTML), 0644)
+	fmt.Println("Taille HTML reçu:", len(debugHTML), "octets")
+	fmt.Println("Nombre d'articles 'article.product-miniature' trouvés:", doc.Find("article.product-miniature").Length())
+	fmt.Println("Titre de la page <title>:", strings.TrimSpace(doc.Find("title").Text()))
+
 	doc.Find("article.product-miniature").Each(func(i int, s *goquery.Selection) {
-    product := models.Product{}
+		product := models.Product{}
 
-    // ID
-    product.ID = s.AttrOr("data-id-product", fmt.Sprintf("%d", i+1))
+		product.ID = s.AttrOr("data-id-product", fmt.Sprintf("%d", i+1))
+		product.Name = strings.TrimSpace(s.Find("h2.product-title a").Text())
+		product.URL, _ = s.Find("h2.product-title a").Attr("href")
 
-    // Nom + URL
-    product.Name = strings.TrimSpace(s.Find("h2.product-title a").Text())
-    product.URL, _ = s.Find("h2.product-title a").Attr("href")
+		product.Image, _ = s.Find(".wb-image-block img").Attr("src")
+		if product.Image == "" {
+			product.Image, _ = s.Find(".wb-image-block img").Attr("data-src")
+		}
 
-    // Image
-    product.Image, _ = s.Find(".wb-image-block img").Attr("src")
-    if product.Image == "" {
-        product.Image, _ = s.Find(".wb-image-block img").Attr("data-src")
-    }
+		product.Price = strings.TrimSpace(s.Find(".price").First().Text())
+		product.Category = category
 
-    // Prix
-    product.Price = strings.TrimSpace(s.Find(".price").First().Text())
+		if product.Name != "" {
+			products = append(products, product)
+		}
+	})
 
-    // Catégorie
-    product.Category = category
-
-    if product.Name != "" {
-        products = append(products, product)
-    }
-})
 	return products, nil
 }
 
+// addPageParam ajoute ou met à jour le paramètre "page" dans l'URL.
+func addPageParam(baseURL string, page int) string {
+	if page <= 1 {
+		return baseURL
+	}
+	parsed, err := url.Parse(baseURL)
+	if err != nil {
+		return baseURL
+	}
+	q := parsed.Query()
+	q.Set("page", fmt.Sprintf("%d", page))
+	parsed.RawQuery = q.Encode()
+	return parsed.String()
+}
+
 func buildURL(query string, category string) string {
-	if query != "" {
-		return fmt.Sprintf("https://www.tunisianet.com.tn/recherche?controller=search&s=%s", query)
-	}
 	if category != "" {
-		return fmt.Sprintf("https://www.tunisianet.com.tn/recherche?controller=search&s=%s", category)
+		if catURL, ok := categories[category]; ok {
+			return catURL
+		}
+		return fmt.Sprintf("https://www.tunisianet.com.tn/recherche?controller=search&s=%s", url.QueryEscape(category))
 	}
+
+	if query != "" {
+		return fmt.Sprintf("https://www.tunisianet.com.tn/recherche?controller=search&s=%s", url.QueryEscape(query))
+	}
+
 	return "https://www.tunisianet.com.tn/recherche?controller=search&s=informatique"
 }
 
