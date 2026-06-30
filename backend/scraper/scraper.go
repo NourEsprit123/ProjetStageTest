@@ -16,19 +16,26 @@ import (
 	"tunisianet-scraper/models"
 )
 
+// IMPORTANT : ces URLs doivent être vérifiées une par une en naviguant sur
+// https://www.tunisianet.com.tn (menu "Toutes nos catégories"), puis en copiant
+// l'URL exacte affichée dans la barre d'adresse pour chaque catégorie.
+// Les ID numériques Tunisianet ne suivent aucun schéma prévisible.
 var categories = map[string]string{
-	"informatique":           "https://www.tunisianet.com.tn/301-informatique",
-	"composants":             "https://www.tunisianet.com.tn/226-composants",
-	"ordinateurs":            "https://www.tunisianet.com.tn/228-ordinateurs",
-	"reseaux":                "https://www.tunisianet.com.tn/235-reseaux-et-connectivite",
-	"peripheriques":          "https://www.tunisianet.com.tn/234-peripheriques",
-	"stockage":               "https://www.tunisianet.com.tn/233-stockages",
-	"telephonie portables":   "https://www.tunisianet.com.tn/302-telephonie",
-	"smartphones":            "https://www.tunisianet.com.tn/286-smartphones",
-	"accessoires telephonie": "https://www.tunisianet.com.tn/accessoires-telephonie",
-	"telephones fixes":       "https://www.tunisianet.com.tn/telephones-fixes",
-	"smartwatch":             "https://www.tunisianet.com.tn/smartwatch",
-	"electromenager":         "https://www.tunisianet.com.tn/303-electromenager",
+	"informatique":         "https://www.tunisianet.com.tn/301-informatique",         // confirmé OK
+	"smartphones":          "https://www.tunisianet.com.tn/596-smartphone-tunisie",    // confirmé OK
+	"telephonie portables": "https://www.tunisianet.com.tn/377-telephone-portable-tunisie", // confirmé OK
+
+	// ⚠️ À VÉRIFIER MANUELLEMENT — probablement incorrectes, retirées du mapping
+	// pour éviter les pages 404 silencieuses. Une fois vérifiées, remets-les ici.
+	// "composants":             "https://www.tunisianet.com.tn/226-composants",
+	// "ordinateurs":            "https://www.tunisianet.com.tn/228-ordinateurs",
+	// "reseaux":                "https://www.tunisianet.com.tn/235-reseaux-et-connectivite",
+	// "peripheriques":          "https://www.tunisianet.com.tn/234-peripheriques",
+	// "stockage":               "https://www.tunisianet.com.tn/233-stockages",
+	// "accessoires telephonie": "https://www.tunisianet.com.tn/accessoires-telephonie",
+	// "telephones fixes":       "https://www.tunisianet.com.tn/telephones-fixes",
+	// "smartwatch":             "https://www.tunisianet.com.tn/smartwatch",
+	// "electromenager":         "https://www.tunisianet.com.tn/303-electromenager",
 }
 
 func getHTTPClient() *http.Client {
