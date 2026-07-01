@@ -1,34 +1,26 @@
 package main
 
 import (
-	"net/http"
+	"tunisianet-scraper/handlers"
 
 	"github.com/labstack/echo/v4"
-	"github.com/labstack/echo/v4/middleware"
-	"tunisianet-scraper/handlers"
+	"github.com/labstack/echo/v4/middleware" // 💡 Ne pas oublier cet import !
 )
 
 func main() {
 	e := echo.New()
 
-	// Middleware
-	e.Use(middleware.Logger())
-	e.Use(middleware.Recover())
-
-	// CORS - permettre les requêtes depuis Next.js
+	// 💡 AJOUTE CES LIGNES ICI (Juste après avoir créé "e")
 	e.Use(middleware.CORSWithConfig(middleware.CORSConfig{
-		AllowOrigins: []string{"http://localhost:3000"},
-		AllowMethods: []string{http.MethodGet, http.MethodPost},
-		AllowHeaders: []string{echo.HeaderContentType},
+		AllowOrigins: []string{"http://localhost:3000"}, // Autorise ton frontend Next.js
+		AllowMethods: []string{echo.GET, echo.PUT, echo.POST, echo.DELETE},
+		AllowHeaders: []string{echo.HeaderOrigin, echo.HeaderContentType, echo.HeaderAccept},
 	}))
 
-	// Routes
-	api := e.Group("/api")
+	// Tes routes actuelles...
+	e.GET("/api/products", handlers.GetProducts)
+	e.GET("/api/categories", handlers.GetCategories)
+	e.GET("/api/products/:id", handlers.GetProductByID)
 
-	api.GET("/products", handlers.GetProducts)
-	api.GET("/products/:id", handlers.GetProductByID)
-	api.GET("/categories", handlers.GetCategories)
-
-	// Démarrer le serveur sur le port 8080
 	e.Logger.Fatal(e.Start(":8080"))
 }
