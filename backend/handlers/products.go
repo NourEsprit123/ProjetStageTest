@@ -119,27 +119,13 @@ func scrapeAllSources(query string, category string) []models.Product {
 }
 
 func GetProducts(c echo.Context) error {
-	query := c.QueryParam("search")
 	category := c.QueryParam("category")
+	search := c.QueryParam("search")
 
-	rawProducts := scrapeAllSources(query, category)
-
-	var filteredProducts []models.Product
-	for _, product := range rawProducts {
-		if category != "" && !matchesCategory(product, category) {
-			continue
-		}
-		if query != "" && !matchesQuery(product, query) {
-			continue
-		}
-		filteredProducts = append(filteredProducts, product)
-	}
+	allProducts := scrapeAllSources(search, category)
 
 	return c.JSON(http.StatusOK, map[string]interface{}{
-		"products": filteredProducts,
-		"total":    len(filteredProducts),
-		"query":    query,
-		"category": category,
+		"products": allProducts,
 	})
 }
 

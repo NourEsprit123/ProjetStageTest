@@ -32,7 +32,7 @@ var mytekCategoryKeywords = map[string]string{
 // ScrapeMytekProducts extrait les données de Mytek en envoyant la vraie recherche et la catégorie séparément
 func ScrapeMytekProducts(query string, category string) ([]models.Product, error) {
 	var allProducts []models.Product
-	client := &http.Client{Timeout: 20 * time.Second}
+	client := &http.Client{Timeout: 4 * time.Second}
 	page := 1
 
 	// Étape 1 : On nettoie et on priorise la recherche textuelle
