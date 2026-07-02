@@ -1,6 +1,9 @@
-package handlers
+﻿package handlers
 
 import (
+	"database/sql"
+	"fmt"
+	"log"
 	"net/http"
 	"regexp"
 	"strings"
@@ -18,7 +21,7 @@ var categoryKeywords = map[string][]string{
 	"ordinateurs":          {"ordinateur", "pc", "laptop", "portable", "lenovo", "hp", "dell", "asus", "acer", "msi"},
 	"composants":           {"carte mere", "carte graphique", "processeur", "ram", "ventilateur", "alimentation", "boitier", "composant"},
 	"reseaux":              {"routeur", "switch", "reseau", "réseau", "wifi", "câble", "cable", "access point", "modem"},
-	"peripheriques":        {"souris", "clavier", "casque", "webcam", "imprimante", "scanner"},
+	"peripheriques":        {"souris", "clavier", "casque", "webcam", "imprimante", "scanner", "sacoche", "sac"},
 	"stockage":             {"disque dur", "ssd", "hdd", "stockage", "cle usb", "clé usb", "sandisk", "kingston"},
 	"electromenager":       {"refrigerateur", "réfrigérateur", "congelateur", "congélateur", "climatiseur", "four", "lave", "seche", "sèche", "aspirateur"},
 }
@@ -28,69 +31,17 @@ var intrusBlacklist = []string{
 	"moule", "brosse chauffante", "epilateur", "rasoir", "tondeuse", "poele", "casserole",
 }
 
-// 💡 Version ultra-robuste de la normalisation (gère le "–" de Wiki.tn)
 func normalizeText(text string) string {
 	text = strings.ToLower(text)
-	
-	// Remplace tous les types de tirets, slashs, pipes, plus et points par un espace
 	reg := regexp.MustCompile(`[\/\-_—–\|\+,\.]`)
 	text = reg.ReplaceAllString(text, " ")
-	
-	// Supprime les espaces multiples et uniformise
 	return strings.Join(strings.Fields(text), " ")
 }
 
 func matchesCategory(product models.Product, category string) bool {
-	if category == "" {
-		return true
-	}
-
-	catLower := strings.ToLower(category)
-	nameNormalized := normalizeText(product.Name)
-
-	keywords, ok := categoryKeywords[catLower]
-	if !ok {
-		return true
-	}
-
-	for _, kw := range keywords {
-		if kw == "pc" {
-			matched, _ := regexp.MatchString(`\bpc\b|\bpc-portable\b`, nameNormalized)
-			if matched {
-				return true
-			}
-		} else {
-			if strings.Contains(nameNormalized, normalizeText(kw)) {
-				return true
-			}
-		}
-	}
-	return false
+    // Désactivation temporaire du filtre pour tester
+    return true 
 }
-
-// 💡 Validation finale par jetons (tokens)
-func matchesQuery(product models.Product, query string) bool {
-	if query == "" {
-		return true
-	}
-
-	productNameNormalized := normalizeText(product.Name)
-	queryWords := strings.Fields(normalizeText(query))
-
-	// Chaque mot-clé important de la recherche doit se retrouver dans le nom du produit
-	for _, word := range queryWords {
-		// On ignore les petits bruits structurels
-		if word == "avec" || word == "pour" || word == "dans" || len(word) <= 1 {
-			continue
-		}
-		
-		if !strings.Contains(productNameNormalized, word) {
-			return false 
-		}
-	}
-	return true
-}
-
 func isBlacklisted(name string) bool {
 	nameLower := strings.ToLower(name)
 	for _, word := range intrusBlacklist {
@@ -101,139 +52,156 @@ func isBlacklisted(name string) bool {
 	return false
 }
 
-// 💡 scrapeAllSources renvoie le flux brut accumulé sans filtrage prématuré
-func scrapeAllSources(query string, category string) []models.Product {
-	var allProducts []models.Product
-	var mu sync.Mutex
-	var wg sync.WaitGroup
+func SaveOrUpdateProduct(db *sql.DB, p models.Product, category string) error {
+	query := `
+INSERT INTO products (name, price, url, image_url, source, category, updated_at)
+VALUES ($1, $2, $3, $4, $5, $6, NOW())
+ON CONFLICT (url) 
+DO UPDATE SET 
+price = EXCLUDED.price,
+name = EXCLUDED.name,
+image_url = EXCLUDED.image_url,
+updated_at = NOW();`
+	_, err := db.Exec(query, p.Name, p.Price, p.URL, p.Image, p.Source, category)
+	return err
+}
 
+func ScrapeAndSaveAll(db *sql.DB, category string) {
+	var wg sync.WaitGroup
 	wg.Add(3)
 
 	// --- TUNISIANET ---
 	go func() {
 		defer wg.Done()
-		products, err := scraper.ScrapeProducts(query, category)
-		if err == nil && len(products) > 0 {
-			mu.Lock()
-			allProducts = append(allProducts, products...)
-			mu.Unlock()
+		// query="" → buildURL utilise la page catégorie dédiée si elle existe
+		products, err := scraper.ScrapeProducts("", category)
+		if err == nil {
+			saved := 0
+			for _, p := range products {
+				p.Source = "tunisianet"
+				if !isBlacklisted(p.Name) && matchesCategory(p, category) {
+					if saveErr := SaveOrUpdateProduct(db, p, category); saveErr == nil {
+						saved++
+					}
+				}
+			}
+			log.Printf("✅ [Tunisianet] %d produits sauvegardés pour '%s'", saved, category)
+		} else {
+			log.Printf("❌ [Tunisianet] Erreur pour '%s': %v", category, err)
 		}
 	}()
 
 	// --- MYTEK ---
 	go func() {
 		defer wg.Done()
-		products, err := scraper.ScrapeMytekProducts(query, category)
-		if err == nil && len(products) > 0 {
-			mu.Lock()
-			allProducts = append(allProducts, products...)
-			mu.Unlock()
+		// ✅ CORRECTION : query="" pour que Mytek utilise mytekCategoryKeywords
+		products, err := scraper.ScrapeMytekProducts("", category)
+		if err == nil {
+			saved := 0
+			for _, p := range products {
+				p.Source = "mytek"
+				if !isBlacklisted(p.Name) && matchesCategory(p, category) {
+					if saveErr := SaveOrUpdateProduct(db, p, category); saveErr == nil {
+						saved++
+					}
+				}
+			}
+			log.Printf("✅ [Mytek] %d produits sauvegardés pour '%s'", saved, category)
+		} else {
+			log.Printf("❌ [Mytek] Erreur pour '%s': %v", category, err)
 		}
 	}()
 
 	// --- WIKI ---
 	go func() {
 		defer wg.Done()
-		products, err := scraper.ScrapeWikiProducts(query, category)
-		if err == nil && len(products) > 0 {
-			mu.Lock()
-			allProducts = append(allProducts, products...)
-			mu.Unlock()
+		// ✅ CORRECTION : query="" pour que Wiki utilise wikiCategories
+		products, err := scraper.ScrapeWikiProducts("", category)
+		if err == nil {
+			saved := 0
+			for _, p := range products {
+				p.Source = "wiki"
+				if !isBlacklisted(p.Name) && matchesCategory(p, category) {
+					if saveErr := SaveOrUpdateProduct(db, p, category); saveErr == nil {
+						saved++
+					}
+				}
+			}
+			log.Printf("✅ [Wiki] %d produits sauvegardés pour '%s'", saved, category)
+		} else {
+			log.Printf("❌ [Wiki] Erreur pour '%s': %v", category, err)
 		}
 	}()
 
 	wg.Wait()
-	return allProducts
+	log.Printf("📥 [Worker] Fin du scraping pour la catégorie : %s", category)
 }
 
-// 💡 Limiter le nombre de mots pour éviter de saturer les moteurs internes de Mytek et Wiki
-func limitQueryWords(query string, maxWords int) string {
-	words := strings.Fields(query)
-	if len(words) > maxWords {
-		return strings.Join(words[:maxWords], " ")
-	}
-	return query
-}
+func GetProductsFromDB(db *sql.DB) echo.HandlerFunc {
+	return func(c echo.Context) error {
+		category := strings.ToLower(strings.TrimSpace(c.QueryParam("category")))
+		search := c.QueryParam("search")
+		cleanedSearch := strings.ToLower(strings.TrimSpace(search))
 
-// 💡 Nettoyage complet des bruits textuels d'origine
-func cleanQueryForScrapers(query string) string {
-	if query == "" {
-		return ""
-	}
-	
-	q := strings.ToLower(query)
-	
-	generics := []string{"pc portable", "ordinateur portable", "pc", "laptop", "avec", "sacoche", "souris"}
-	for _, gen := range generics {
-		q = strings.ReplaceAll(q, gen, "")
-	}
-	
-	reg := regexp.MustCompile(`[\/\-_,\+]`)
-	q = reg.ReplaceAllString(q, " ")
-	
-	return strings.Join(strings.Fields(q), " ")
-}
+		results := []models.Product{}
 
-func GetProducts(c echo.Context) error {
-	category := c.QueryParam("category")
-	search := c.QueryParam("search")
+      sqlQuery := "SELECT url, name, price, url, image_url, source, category FROM products WHERE 1=1"	
+	  	var args []interface{}
+		argIdx := 1
 
-	cleanedSearch := cleanQueryForScrapers(search)
-	if cleanedSearch == "" {
-		cleanedSearch = search
-	}
-
-	broadSearch := limitQueryWords(cleanedSearch, 3)
-	allProducts := scrapeAllSources(broadSearch, category)
-
-	// --- AJOUT DU DEBUG ICI ---
-	println("--- DEBUG FILTRAGE ---")
-	println("Recherche nettoyée cible :", cleanedSearch)
-	println("Nombre total de produits reçus des scrapers :", len(allProducts))
-	// ---------------------------
-
-	var filteredProducts []models.Product
-	for _, p := range allProducts {
-		matchQ := matchesQuery(p, cleanedSearch)
-		matchC := matchesCategory(p, category)
-		
-		// Décommente la ligne ci-dessous si tu veux voir le comportement de chaque produit :
-		// fmt.Printf("Produit: %s | MatchQuery: %t | MatchCategory: %t\n", p.Name, matchQ, matchC)
-
-		if matchQ && matchC && !isBlacklisted(p.Name) {
-			filteredProducts = append(filteredProducts, p)
+		if category != "" {
+			sqlQuery += fmt.Sprintf(" AND LOWER(category) = $%d", argIdx)
+			args = append(args, category)
+			argIdx++
 		}
+
+		if cleanedSearch != "" {
+			words := strings.Fields(cleanedSearch)
+			for _, word := range words {
+				if len(word) > 1 {
+					sqlQuery += fmt.Sprintf(" AND name ILIKE $%d", argIdx)
+					args = append(args, "%"+word+"%")
+					argIdx++
+				}
+			}
+		}
+
+		sqlQuery += " ORDER BY updated_at DESC"
+
+		log.Printf("DEBUG SQL: Query=%s", sqlQuery)
+        log.Printf("DEBUG SQL: Args=%v", args)
+
+		
+  
+
+		rows, err := db.Query(sqlQuery, args...)
+		if err != nil {
+			log.Printf("❌ Erreur SQL : %v", err)
+			return c.JSON(http.StatusInternalServerError, map[string]string{"error": "Erreur SQL interne"})
+		}
+		defer rows.Close()
+
+		for rows.Next() {
+			var p models.Product
+err := rows.Scan(&p.ID, &p.Name, &p.Price, &p.URL, &p.Image, &p.Source, &p.Category)
+			if err != nil {
+				log.Printf("⚠️ Erreur Scan SQL: %v", err)
+				continue
+			}
+			results = append(results, p)
+		}
+
+		log.Printf("🔍 Catégorie: '%s' | Recherche: '%s' | Résultats: %d", category, search, len(results))
+
+		return c.JSON(http.StatusOK, map[string]interface{}{
+			"products": results,
+		})
 	}
-
-	println("Nombre de produits après filtrage :", len(filteredProducts))
-	println("----------------------")
-
-	return c.JSON(http.StatusOK, map[string]interface{}{
-		"products": filteredProducts,
-	})
 }
 
 func GetCategories(c echo.Context) error {
 	categories := scraper.GetCategories()
 	return c.JSON(http.StatusOK, map[string]interface{}{
 		"categories": categories,
-	})
-}
-
-func GetProductByID(c echo.Context) error {
-	id := c.Param("id")
-	query := c.QueryParam("search")
-	category := c.QueryParam("category")
-
-	products := scrapeAllSources(query, category)
-
-	for _, product := range products {
-		if product.ID == id {
-			return c.JSON(http.StatusOK, product)
-		}
-	}
-
-	return c.JSON(http.StatusNotFound, map[string]string{
-		"error": "Produit non trouvé",
 	})
 }

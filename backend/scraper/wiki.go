@@ -36,7 +36,7 @@ func getWikiHTTPClient() *http.Client {
 }
 
 func ScrapeWikiProducts(query string, category string) ([]models.Product, error) {
-	const maxPages = 2
+	const maxPages = 5 // Augmente à 5 pour avoir plus de données
 	var allProducts []models.Product
 	client := getWikiHTTPClient()
 
@@ -45,19 +45,12 @@ func ScrapeWikiProducts(query string, category string) ([]models.Product, error)
 		fmt.Printf("📥 [Wiki.tn] Scraping Page %d: %s\n", page, pageURL)
 
 		products, err := scrapeWikiPage(client, pageURL, category)
-		if err != nil {
-			fmt.Printf("⚠️ [Wiki.tn] Erreur page %d: %v\n", page, err)
+		if err != nil || len(products) == 0 { // Si erreur ou vide, on arrête proprement
 			break
 		}
-		if len(products) == 0 {
-			fmt.Printf("🏁 [Wiki.tn] Fin à la page %d\n", page)
-			break
-		}
-		fmt.Printf("✅ [Wiki.tn] %d produits récupérés à la page %d\n", len(products), page)
+		
 		allProducts = append(allProducts, products...)
-		if len(products) < 12 {
-			break
-		}
+		// 💡 Supprime le "if len(products) < 12 { break }" car il est trop agressif
 	}
 	return allProducts, nil
 }

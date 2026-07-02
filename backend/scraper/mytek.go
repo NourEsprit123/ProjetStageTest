@@ -21,24 +21,24 @@ type MytekAPIProduct struct {
 	Stock int     `json:"stock_status"`
 }
 
-// Map pour faire correspondre tes catégories locales avec les mots-clés de recherche Mytek
 var mytekCategoryKeywords = map[string]string{
 	"smartphones":          "telephone",
 	"telephonie portables": "telephone",
 	"informatique":         "pc",
 	"ordinateurs":          "ordinateur",
+	"composants":           "composant",
+	"reseaux":              "reseau",
+	"peripheriques":        "peripherique",
+	"stockage":             "stockage",
+	"electromenager":       "electromenager",
 }
 
-// ScrapeMytekProducts extrait les données de Mytek en envoyant la vraie recherche et la catégorie séparément
 func ScrapeMytekProducts(query string, category string) ([]models.Product, error) {
 	var allProducts []models.Product
-	client := &http.Client{Timeout: 4 * time.Second}
-	page := 1
+	client := &http.Client{Timeout: 15 * time.Second}
 
-	// Étape 1 : On nettoie et on priorise la recherche textuelle
 	searchQuery := query
 	if searchQuery == "" {
-		// Si pas de texte, on cherche le mot-clé lié à la catégorie
 		if kw, ok := mytekCategoryKeywords[category]; ok {
 			searchQuery = kw
 		} else {
@@ -49,10 +49,9 @@ func ScrapeMytekProducts(query string, category string) ([]models.Product, error
 		searchQuery = "pc"
 	}
 
-	for page <= 3 { 
-		fmt.Printf("📥 [Mytek API] Récupération de la page %d pour : %s (Filtre Catégorie: %s)\n", page, searchQuery, category)
+	for page := 1; page <= 5; page++ {
+		fmt.Printf("📥 [Mytek API] Récupération de la page %d pour : %s (Catégorie: %s)\n", page, searchQuery, category)
 
-		// On passe maintenant searchQuery ET category à la fonction de l'API
 		products, err := fetchMytekAPIPage(client, searchQuery, category, page)
 		if err != nil {
 			fmt.Printf("⚠️ [Mytek API] Erreur à la page %d: %v\n", page, err)
@@ -60,24 +59,24 @@ func ScrapeMytekProducts(query string, category string) ([]models.Product, error
 		}
 
 		if len(products) == 0 {
-			fmt.Printf("🏁 [Mytek API] Aucun produit retourné à la page %d. Fin.\n", page)
+			fmt.Printf("🏁 [Mytek API] Aucun produit à la page %d. Fin.\n", page)
 			break
 		}
 
 		allProducts = append(allProducts, products...)
-		page++
 		time.Sleep(1 * time.Second)
 	}
 
 	return allProducts, nil
 }
 
-// fetchMytekAPIPage utilise l'API Magento en appliquant un filtre optionnel sur la catégorie
 func fetchMytekAPIPage(client *http.Client, query string, category string, page int) ([]models.Product, error) {
 	var results []models.Product
 
-	// On garde une requête simple et ultra-rapide pour éviter le TLS Handshake Timeout
-	apiURL := fmt.Sprintf("https://www.mytek.tn/rest/V1/products?searchCriteria[filter_groups][0][filters][0][field]=name&searchCriteria[filter_groups][0][filters][0][value]=%%25%s%%25&searchCriteria[filter_groups][0][filters][0][condition_type]=like&searchCriteria[pageSize]=24&searchCriteria[currentPage]=%d", url.QueryEscape(query), page)
+	apiURL := fmt.Sprintf(
+		"https://www.mytek.tn/rest/V1/products?searchCriteria[filter_groups][0][filters][0][field]=name&searchCriteria[filter_groups][0][filters][0][value]=%%25%s%%25&searchCriteria[filter_groups][0][filters][0][condition_type]=like&searchCriteria[pageSize]=24&searchCriteria[currentPage]=%d",
+		url.QueryEscape(query), page,
+	)
 
 	req, err := http.NewRequest("GET", apiURL, nil)
 	if err != nil {
@@ -141,13 +140,13 @@ func fetchMytekAPIPage(client *http.Client, query string, category string, page 
 				}
 			}
 		}
-		
+
 		if p.Name != "" {
 			results = append(results, p)
 		}
 	}
 
-	fmt.Printf("[Mytek API Debug] Extrait avec succès %d produits depuis l'API (Page %d).\n", len(results), page)
+	fmt.Printf("[Mytek API Debug] %d produits extraits (Page %d).\n", len(results), page)
 	return results, nil
 }
 

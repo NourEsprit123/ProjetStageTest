@@ -8,7 +8,6 @@ import (
 	"net"
 	"net/http"
 	"net/url"
-	"os"
 	"strings"
 	"time"
 
@@ -16,20 +15,15 @@ import (
 	"tunisianet-scraper/models"
 )
 
-// IMPORTANT : ces URLs doivent être vérifiées une par une en naviguant sur
-// https://www.tunisianet.com.tn (menu "Toutes nos catégories"), puis en copiant
-// l'URL exacte affichée dans la barre d'adresse pour chaque catégorie.
 var categories = map[string]string{
-	"informatique":         "https://www.tunisianet.com.tn/301-informatique",         // confirmé OK
-	"smartphones":          "https://www.tunisianet.com.tn/596-smartphone-tunisie",    // confirmé OK
-	"telephonie portables": "https://www.tunisianet.com.tn/377-telephone-portable-tunisie", // confirmé OK
+	"informatique":         "https://www.tunisianet.com.tn/301-informatique",
+	"smartphones":          "https://www.tunisianet.com.tn/596-smartphone-tunisie",
+	"telephonie portables": "https://www.tunisianet.com.tn/377-telephone-portable-tunisie",
 }
 
 func getHTTPClient() *http.Client {
 	transport := &http.Transport{
-		TLSClientConfig: &tls.Config{
-			InsecureSkipVerify: true,
-		},
+		TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
 		DialContext: (&net.Dialer{
 			Timeout:   30 * time.Second,
 			KeepAlive: 30 * time.Second,
@@ -37,56 +31,45 @@ func getHTTPClient() *http.Client {
 		TLSHandshakeTimeout:   30 * time.Second,
 		ResponseHeaderTimeout: 30 * time.Second,
 	}
-	return &http.Client{
-		Timeout:   60 * time.Second,
-		Transport: transport,
-	}
+	return &http.Client{Timeout: 60 * time.Second, Transport: transport}
 }
 
-// ScrapeProducts récupère TOUTES les pages de résultats disponibles de manière dynamique.
 func ScrapeProducts(query string, category string) ([]models.Product, error) {
+	const maxPages = 5 // ← Limite de sécurité : évite les 31 pages pour "stockage"
+
 	var allProducts []models.Product
 	baseURL := buildURL(query, category)
 	client := getHTTPClient()
 
-	page := 1
-	for {
+	for page := 1; page <= maxPages; page++ {
 		pageURL := addPageParam(baseURL, page)
 		fmt.Printf("📥 [Tunisianet] Scraping Page %d: %s\n", page, pageURL)
 
 		products, htmlDoc, err := scrapePageWithDoc(client, pageURL, category)
 		if err != nil {
-			// En cas d'erreur sur une page (ex: 404), on renvoie ce qu'on a déjà pour ne pas tout perdre
-			fmt.Printf("⚠️ [Tunisianet] Arrêt ou erreur à la page %d: %v\n", page, err)
+			fmt.Printf("⚠️ [Tunisianet] Arrêt à la page %d: %v\n", page, err)
 			return allProducts, nil
 		}
 
-		// Si la page ne contient aucun produit, on arrête la pagination
 		if len(products) == 0 {
-			fmt.Printf("🏁 [Tunisianet] Plus de produits trouvés. Fin à la page %d.\n", page)
+			fmt.Printf("🏁 [Tunisianet] Plus de produits. Fin à la page %d.\n", page)
 			break
 		}
 
 		allProducts = append(allProducts, products...)
 
-		// 🔍 CONDITION D'ARRÊT : On vérifie si le bouton "Suivant" est présent sur la page.
-		// PrestaShop utilise généralement la classe 'a.next' ou l'attribut 'rel="next"'
 		hasNextPage := htmlDoc.Find("a.next, a[rel='next']").Length() > 0
 		if !hasNextPage {
-			fmt.Printf("🏁 [Tunisianet] Fin du catalogue atteinte naturellement à la page %d.\n", page)
+			fmt.Printf("🏁 [Tunisianet] Fin naturelle à la page %d.\n", page)
 			break
 		}
 
-		page++
-		
-		// Pause de sécurité pour éviter d'être bloqué par le serveur
 		time.Sleep(300 * time.Millisecond)
 	}
 
 	return allProducts, nil
 }
 
-// scrapePageWithDoc effectue la requête et extrait les données tout en retournant le document HTML complet pour analyse.
 func scrapePageWithDoc(client *http.Client, pageURL string, category string) ([]models.Product, *goquery.Document, error) {
 	var products []models.Product
 
@@ -126,13 +109,6 @@ func scrapePageWithDoc(client *http.Client, pageURL string, category string) ([]
 		return nil, nil, err
 	}
 
-	// Code de débug original conservé
-	debugHTML, _ := doc.Html()
-	os.WriteFile("debug_page.html", []byte(debugHTML), 0644)
-	fmt.Println("[Tunisianet Debug] Taille HTML reçu:", len(debugHTML), "octets")
-	fmt.Println("[Tunisianet Debug] Articles 'article.product-miniature' trouvés:", doc.Find("article.product-miniature").Length())
-	fmt.Println("[Tunisianet Debug] Titre de la page <title>:", strings.TrimSpace(doc.Find("title").Text()))
-
 	doc.Find("article.product-miniature").Each(func(i int, s *goquery.Selection) {
 		product := models.Product{}
 
@@ -147,8 +123,6 @@ func scrapePageWithDoc(client *http.Client, pageURL string, category string) ([]
 
 		product.Price = strings.TrimSpace(s.Find(".price").First().Text())
 		product.Category = category
-
-		// Vérification basique de la disponibilité dans le DOM (optionnel selon le thème)
 		product.InStock = !strings.Contains(strings.ToLower(s.Text()), "hors stock")
 
 		if product.Name != "" {
@@ -159,7 +133,6 @@ func scrapePageWithDoc(client *http.Client, pageURL string, category string) ([]
 	return products, doc, nil
 }
 
-// addPageParam ajoute ou met à jour le paramètre "page" dans l'URL.
 func addPageParam(baseURL string, page int) string {
 	if page <= 1 {
 		return baseURL
@@ -175,46 +148,25 @@ func addPageParam(baseURL string, page int) string {
 }
 
 func buildURL(query string, category string) string {
-	// Si l'utilisateur tape un texte, c'est ce texte précis qu'on cherche en priorité !
 	if query != "" {
 		return fmt.Sprintf("https://www.tunisianet.com.tn/recherche?controller=search&s=%s", url.QueryEscape(query))
 	}
-
-	// Sinon, s'il n'y a pas de texte mais une catégorie, on charge l'URL de la catégorie
 	if category != "" {
 		if catURL, ok := categories[category]; ok {
 			return catURL
 		}
 		return fmt.Sprintf("https://www.tunisianet.com.tn/recherche?controller=search&s=%s", url.QueryEscape(category))
 	}
-
 	return "https://www.tunisianet.com.tn/recherche?controller=search&s=informatique"
 }
 
 func GetCategories() []string {
 	return []string{
-		"informatique",
-		"composants",
-		"ordinateurs",
-		"reseaux",
-		"peripheriques",
-		"stockage",
-		"telephonie portables",
-		"smartphones",
-		"accessoires telephonie",
-		"telephones fixes",
-		"smartwatch",
-		"sante beaute",
-		"toiletries",
-		"moniteurs sante",
-		"bebe enfants",
-		"pharmaceutiques",
-		"soins personnels",
-		"electromenager",
-		"aspirateurs",
-		"machine a laver",
-		"seche linge",
-		"lave vaisselle",
-		"fours",
+		"informatique", "composants", "ordinateurs", "reseaux", "peripheriques",
+		"stockage", "telephonie portables", "smartphones", "accessoires telephonie",
+		"telephones fixes", "smartwatch", "sante beaute", "toiletries",
+		"moniteurs sante", "bebe enfants", "pharmaceutiques", "soins personnels",
+		"electromenager", "aspirateurs", "machine a laver", "seche linge",
+		"lave vaisselle", "fours",
 	}
 }

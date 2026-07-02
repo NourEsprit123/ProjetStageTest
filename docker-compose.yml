@@ -1,18 +1,38 @@
 version: '3.8'
 
 services:
+  db:
+    image: postgres:15
+    container_name: tunisianet-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: nour 
+      POSTGRES_DB: postgres
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
   backend:
     build:
       context: ./backend
       dockerfile: Dockerfile
+    container_name: tunisianet-scraper-backend
     ports:
       - "8080:8080"
+    depends_on:
+      - db
+    environment:
+      # C'est ici que le backend apprend à se connecter au conteneur 'db'
+      - DB_URL=postgres://postgres:nour@db:5432/postgres?sslmode=disable
     restart: unless-stopped
 
   frontend:
     build:
       context: ./frontend
       dockerfile: Dockerfile
+    container_name: tunisianet-scraper-frontend
     ports:
       - "3000:3000"
     environment:
@@ -20,3 +40,6 @@ services:
     depends_on:
       - backend
     restart: unless-stopped
+
+volumes:
+  postgres_data:
