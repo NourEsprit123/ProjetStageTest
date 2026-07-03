@@ -33,7 +33,7 @@ func startPeriodicWorker(db *sql.DB) {
 		log.Println("✅ [Worker] Premier scraping terminé pour toutes les catégories ! Base de données prête.")
 	}()
 
-	ticker := time.NewTicker(1 * time.Hour)
+	ticker := time.NewTicker(1 * time.Minute)
 	go func() {
 		for range ticker.C {
 			log.Println("⏰ Worker : Lancement de la mise à jour horaire automatique...")
@@ -44,6 +44,11 @@ func startPeriodicWorker(db *sql.DB) {
 		}
 	}()
 }
+
+
+
+
+
 
 func main() {
 	e := echo.New()

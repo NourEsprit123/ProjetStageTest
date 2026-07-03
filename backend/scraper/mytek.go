@@ -24,7 +24,7 @@ type MytekAPIProduct struct {
 var mytekCategoryKeywords = map[string]string{
 	"smartphones":          "telephone",
 	"telephonie portables": "telephone",
-	"informatique":         "pc",
+	"informatique":         "pc portable",
 	"ordinateurs":          "ordinateur",
 	"composants":           "composant",
 	"reseaux":              "reseau",

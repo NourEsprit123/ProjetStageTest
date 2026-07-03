@@ -10,6 +10,7 @@ import (
 	"net/url"
 	"strings"
 	"time"
+	"log"
 
 	"github.com/PuerkitoBio/goquery"
 	"tunisianet-scraper/models"
@@ -128,6 +129,8 @@ func scrapePageWithDoc(client *http.Client, pageURL string, category string) ([]
 		if product.Name != "" {
 			products = append(products, product)
 		}
+
+		log.Printf("DEBUG: Found %d products on Tunisianet", doc.Find("article.product-miniature").Length())
 	})
 
 	return products, doc, nil
