@@ -13,17 +13,18 @@ interface Product {
   description: string;
   in_stock: boolean;
   source: string;
+  score: number;
 }
 
 const PRODUCTS_PER_PAGE = 24;
 
 export default function Home() {
-  const [search, setSearch] = useState('');
-  const [category, setCategory] = useState('');
-  const [allProducts, setAllProducts] = useState<Product[]>([]);
-  const [loading, setLoading] = useState(false);
-  const [searched, setSearched] = useState(false);
-  const [currentPage, setCurrentPage] = useState(1);
+  const [search, setSearch] = useState<string>('');
+const [category, setCategory] = useState<string>('');
+const [allProducts, setAllProducts] = useState<Product[]>([]);
+const [loading, setLoading] = useState<boolean>(false);
+const [searched, setSearched] = useState<boolean>(false);
+const [currentPage, setCurrentPage] = useState<number>(1);
   const router = useRouter();
 
   const categories = [
@@ -174,6 +175,12 @@ export default function Home() {
                         <h2 className="font-semibold text-gray-800 text-sm line-clamp-2 mb-3">
                           {product.name}
                         </h2>
+
+
+             <div className="text-[10px] text-gray-400 mb-2">
+  {/* On vérifie si score est un nombre valide */}
+  Pertinence : {typeof product.score === 'number' ? product.score.toFixed(2) : "N/A"}
+</div>
                         <div className="flex justify-between items-center mb-2">
                           <span className="text-blue-700 font-bold text-lg">{product.price}</span>
                           <span className={`text-xs px-2 py-1 rounded-full font-semibold ${badge.cls}`}>
@@ -235,3 +242,5 @@ export default function Home() {
     </main>
   );
 }
+
+

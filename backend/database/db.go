@@ -9,27 +9,63 @@ import (
 )
 
 func InitDB() *sql.DB {
-	// Configuration calquée exactement sur ton Docker
-	host := "db"
-	port := 5432
-	user := "postgres"
-	password := "nour" // Le mot de passe que tu as mis dans ton terminal
-	dbname := "postgres" // Par défaut sous Docker, la base initiale s'appelle 'postgres'
+	host     := "db"
+	port     := 5432
+	user     := "postgres"
+	password := "nour"
+	dbname   := "postgres"
 
-	connStr := fmt.Sprintf("host=%s port=%d user=%s password=%s dbname=%s sslmode=disable",
-		host, port, user, password, dbname)
+	connStr := fmt.Sprintf(
+		"host=%s port=%d user=%s password=%s dbname=%s sslmode=disable",
+		host, port, user, password, dbname,
+	)
 
 	db, err := sql.Open("postgres", connStr)
 	if err != nil {
-		log.Fatalf("❌ Erreur d'ouverture de la base de données: %v", err)
+		log.Fatalf("❌ Erreur ouverture BD: %v", err)
+	}
+	if err = db.Ping(); err != nil {
+		log.Fatalf("❌ Impossible de ping PostgreSQL: %v", err)
 	}
 
-	// Vérification de la connectivité réelle
-	err = db.Ping()
+	// Création des tables si elles n'existent pas
+	_, err = db.Exec(`
+		CREATE TABLE IF NOT EXISTS products (
+			id          SERIAL PRIMARY KEY,
+			name        TEXT NOT NULL,
+			price       TEXT,
+			url         TEXT UNIQUE NOT NULL,
+			image_url   TEXT,
+			source      TEXT,
+			category    TEXT,
+			reference   TEXT,
+			updated_at  TIMESTAMP DEFAULT NOW()
+		);
+
+		CREATE TABLE IF NOT EXISTS price_history (
+			id          SERIAL PRIMARY KEY,
+			product_url TEXT NOT NULL,
+			price       TEXT,
+			recorded_at TIMESTAMP DEFAULT NOW()
+		);
+
+		CREATE INDEX IF NOT EXISTS idx_products_reference ON products(reference);
+		CREATE INDEX IF NOT EXISTS idx_products_category  ON products(category);
+		CREATE INDEX IF NOT EXISTS idx_price_history_url  ON price_history(product_url);
+	`)
 	if err != nil {
-		log.Fatalf("❌ Impossible de ping PostgreSQL (Vérifie que Docker tourne): %v", err)
+		log.Fatalf("❌ Erreur création tables: %v", err)
 	}
 
-	fmt.Println("🚀 Connecté avec succès à PostgreSQL via Docker !")
+	// TRUNCATE CASCADE vide products ET price_history en une seule commande
+	// sans se soucier des contraintes de clés étrangères
+	_, err = db.Exec("TRUNCATE TABLE products CASCADE")
+	if err != nil {
+		log.Printf("⚠️ Impossible de vider la BD: %v", err)
+	} else {
+		log.Println("🗑️ BD vidée au démarrage — prête pour les recherches par référence")
+	}
+
+	log.Println("🚀 Connecté à PostgreSQL !")
 	return db
 }
