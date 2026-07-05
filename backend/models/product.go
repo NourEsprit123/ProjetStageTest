@@ -12,6 +12,7 @@ type Product struct {
 	Source      string `json:"source"` // 💡 Le S majuscule ici est obligatoire pour être visible par le handler !
 	Score       float64 `json:"score"`
 	UpdatedAt string  `json:"updated_at"`
+	 Reference   string  `json:"reference"`
 }
 
 type SearchRequest struct {

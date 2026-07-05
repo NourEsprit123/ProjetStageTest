@@ -11,21 +11,33 @@ import (
 )
 
 func main() {
+	// 1. Initialisation du framework Echo
 	e := echo.New()
 
+	// Configuration CORS pour autoriser le front-end
 	e.Use(middleware.CORSWithConfig(middleware.CORSConfig{
 		AllowOrigins: []string{"http://localhost:3000", "http://localhost:5000"},
 		AllowMethods: []string{http.MethodGet, http.MethodPost},
 	}))
 
-	// Connexion BD (vide la table products au démarrage)
+	// 2. Initialisation unique de la DB Postgres
 	db := database.InitDB()
 	defer db.Close()
 
-	// Routes
-	e.GET("/api/products", handlers.GetProductsFromDB(db))
+	// 3. Initialisation d'Elasticsearch
+	// On le fait une seule fois au démarrage
+	es, err := database.InitES()
+	if err != nil {
+		  log.Printf("⚠️ Elasticsearch non disponible, recherche via PostgreSQL uniquement: %v", err)
+          es = nil
+	}
+
+	// 4. Routes 
+	// On passe 'db' ET 'es' aux handlers pour qu'ils puissent chercher/sauvegarder
+	e.GET("/api/products", handlers.GetProductsFromDB(db, es))
 	e.GET("/api/categories", handlers.GetCategories)
 
-	log.Println("⇨ API Server démarré sur http://localhost:8080")
+	// Démarrage du serveur
+	log.Println("🚀 API Server démarré sur http://localhost:8080")
 	e.Logger.Fatal(e.Start(":8080"))
 }
