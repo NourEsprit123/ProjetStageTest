@@ -59,12 +59,7 @@ func InitDB() *sql.DB {
 
 	// TRUNCATE CASCADE vide products ET price_history en une seule commande
 	// sans se soucier des contraintes de clés étrangères
-	_, err = db.Exec("TRUNCATE TABLE products CASCADE")
-	if err != nil {
-		log.Printf("⚠️ Impossible de vider la BD: %v", err)
-	} else {
-		log.Println("🗑️ BD vidée au démarrage — prête pour les recherches par référence")
-	}
+	
 
 	log.Println("🚀 Connecté à PostgreSQL !")
 	return db

@@ -6,6 +6,7 @@ import (
     "database/sql"
     "encoding/json"
     "log"
+    "strings"
     "tunisianet-scraper/models" // Assure-toi que cet import est correct
     "github.com/elastic/go-elasticsearch/v8"
 )
@@ -17,6 +18,33 @@ func InitES() (*elasticsearch.Client, error) {
     }
 
     es, err := elasticsearch.NewClient(cfg)
+    mapping := `
+{
+  "mappings": {
+    "properties": {
+      "name": {
+        "type": "text"
+      },
+      "reference": {
+        "type": "keyword"
+      },
+      "category": {
+        "type": "keyword"
+      },
+      "source": {
+        "type": "keyword"
+      }
+    }
+  }
+}
+`
+
+es.Indices.Delete([]string{"products"})
+
+es.Indices.Create(
+    "products",
+    es.Indices.Create.WithBody(strings.NewReader(mapping)),
+)
     if err != nil {
         return nil, err
     }

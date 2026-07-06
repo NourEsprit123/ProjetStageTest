@@ -5,12 +5,12 @@ import (
 	"crypto/tls"
 	"fmt"
 	"io"
+	"log"
 	"net"
 	"net/http"
 	"net/url"
 	"strings"
 	"time"
-	"log"
 
 	"github.com/PuerkitoBio/goquery"
 	"tunisianet-scraper/models"
@@ -36,7 +36,7 @@ func getHTTPClient() *http.Client {
 }
 
 func ScrapeProducts(query string, category string) ([]models.Product, error) {
-	const maxPages = 5 // ← Limite de sécurité : évite les 31 pages pour "stockage"
+	const maxPages = 30
 
 	var allProducts []models.Product
 	baseURL := buildURL(query, category)
@@ -80,12 +80,10 @@ func scrapePageWithDoc(client *http.Client, pageURL string, category string) ([]
 	}
 
 	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
+	req.Header.Set("Referer", "https://www.google.com/")
 	req.Header.Set("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8")
 	req.Header.Set("Accept-Language", "fr-FR,fr;q=0.9")
-	req.Header.Set("Accept-Encoding", "gzip, deflate")
 	req.Header.Set("Connection", "keep-alive")
-	req.Header.Set("Upgrade-Insecure-Requests", "1")
-	req.Header.Set("Cache-Control", "max-age=0")
 
 	resp, err := client.Do(req)
 	if err != nil {
@@ -113,15 +111,13 @@ func scrapePageWithDoc(client *http.Client, pageURL string, category string) ([]
 	doc.Find("article.product-miniature").Each(func(i int, s *goquery.Selection) {
 		product := models.Product{}
 
-		product.ID = s.AttrOr("data-id-product", fmt.Sprintf("%d", i+1))
+		product.ID = s.AttrOr("data-id-product", fmt.Sprintf("%d", i))
 		product.Name = strings.TrimSpace(s.Find("h2.product-title a").Text())
 		product.URL, _ = s.Find("h2.product-title a").Attr("href")
-
 		product.Image, _ = s.Find(".wb-image-block img").Attr("src")
 		if product.Image == "" {
 			product.Image, _ = s.Find(".wb-image-block img").Attr("data-src")
 		}
-
 		product.Price = strings.TrimSpace(s.Find(".price").First().Text())
 		product.Category = category
 		product.InStock = !strings.Contains(strings.ToLower(s.Text()), "hors stock")
@@ -129,10 +125,9 @@ func scrapePageWithDoc(client *http.Client, pageURL string, category string) ([]
 		if product.Name != "" {
 			products = append(products, product)
 		}
-
-		log.Printf("DEBUG: Found %d products on Tunisianet", doc.Find("article.product-miniature").Length())
 	})
 
+	log.Printf("DEBUG: Found %d products on %s", len(products), pageURL)
 	return products, doc, nil
 }
 
@@ -151,9 +146,11 @@ func addPageParam(baseURL string, page int) string {
 }
 
 func buildURL(query string, category string) string {
+	// Si query est fourni → priorité à la recherche textuelle
 	if query != "" {
 		return fmt.Sprintf("https://www.tunisianet.com.tn/recherche?controller=search&s=%s", url.QueryEscape(query))
 	}
+	// Catégorie seule → page catégorie dédiée
 	if category != "" {
 		if catURL, ok := categories[category]; ok {
 			return catURL

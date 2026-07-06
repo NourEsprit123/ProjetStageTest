@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/url"
 	"time"
+	"strings"
 
 	"tunisianet-scraper/models"
 )
@@ -37,39 +38,52 @@ func ScrapeMytekProducts(query string, category string) ([]models.Product, error
 	var allProducts []models.Product
 	client := &http.Client{Timeout: 15 * time.Second}
 
-	searchQuery := query
-	if searchQuery == "" {
+	// 1. Logique de priorité :
+	// Si une catégorie est définie, on force le mot-clé correspondant.
+	// On ignore la 'query' car elle vient souvent d'une recherche textuelle globale.
+	searchQuery := ""
+	if category != "" {
 		if kw, ok := mytekCategoryKeywords[category]; ok {
 			searchQuery = kw
 		} else {
 			searchQuery = category
 		}
+	} else if query != "" {
+		// On n'utilise la query que si aucune catégorie n'est précisée
+		searchQuery = query
+	} else {
+		searchQuery = "pc" // Valeur de repli
 	}
-	if searchQuery == "" {
-		searchQuery = "pc"
-	}
+
+	fmt.Printf("🔍 [Mytek API] Lancement pour: '%s' | Catégorie: '%s'\n", searchQuery, category)
 
 	for page := 1; page <= 5; page++ {
-		fmt.Printf("📥 [Mytek API] Récupération de la page %d pour : %s (Catégorie: %s)\n", page, searchQuery, category)
-
 		products, err := fetchMytekAPIPage(client, searchQuery, category, page)
 		if err != nil {
-			fmt.Printf("⚠️ [Mytek API] Erreur à la page %d: %v\n", page, err)
 			break
 		}
-
 		if len(products) == 0 {
-			fmt.Printf("🏁 [Mytek API] Aucun produit à la page %d. Fin.\n", page)
 			break
 		}
 
-		allProducts = append(allProducts, products...)
+		// 2. FILTRAGE POST-RÉCUPÉRATION
+		// Même si l'API Mytek renvoie des résultats, on vérifie manuellement 
+		// si le nom du produit contient bien le mot-clé de la catégorie.
+		if category != "" {
+			for _, p := range products {
+				if strings.Contains(strings.ToLower(p.Name), strings.ToLower(searchQuery)) {
+					allProducts = append(allProducts, p)
+				}
+			}
+		} else {
+			allProducts = append(allProducts, products...)
+		}
+
 		time.Sleep(1 * time.Second)
 	}
 
 	return allProducts, nil
 }
-
 func fetchMytekAPIPage(client *http.Client, query string, category string, page int) ([]models.Product, error) {
 	var results []models.Product
 
