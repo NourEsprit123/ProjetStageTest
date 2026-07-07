@@ -1,5 +1,10 @@
 package models
 
+import (
+	"crypto/sha256"
+	"encoding/hex"
+)
+
 type Product struct {
 	ID          string `json:"id"`
 	Name        string `json:"name"`
@@ -18,4 +23,13 @@ type Product struct {
 type SearchRequest struct {
 	Query    string `json:"query"`
 	Category string `json:"category"`
+}
+
+
+// DocIDFromURL génère un ID de document Elasticsearch stable et valide
+// (sans "/" ni caractères spéciaux) à partir d'une URL produit.
+// C'est nécessaire car ES rejette les URL brutes contenant des "/" comme _id.
+func DocIDFromURL(url string) string {
+	h := sha256.Sum256([]byte(url))
+	return hex.EncodeToString(h[:])
 }

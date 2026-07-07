@@ -28,7 +28,6 @@ func InitDB() *sql.DB {
 		log.Fatalf("❌ Impossible de ping PostgreSQL: %v", err)
 	}
 
-	// Création des tables si elles n'existent pas
 	_, err = db.Exec(`
 		CREATE TABLE IF NOT EXISTS products (
 			id          SERIAL PRIMARY KEY,
@@ -56,10 +55,6 @@ func InitDB() *sql.DB {
 	if err != nil {
 		log.Fatalf("❌ Erreur création tables: %v", err)
 	}
-
-	// TRUNCATE CASCADE vide products ET price_history en une seule commande
-	// sans se soucier des contraintes de clés étrangères
-	
 
 	log.Println("🚀 Connecté à PostgreSQL !")
 	return db

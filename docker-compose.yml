@@ -27,6 +27,9 @@ services:
       - "ES_JAVA_OPTS=-Xms1g -Xmx1g"
     ports:
       - "9200:9200"
+
+    volumes:
+      - es_data:/usr/share/elasticsearch/data  
     healthcheck:
       test: ["CMD-SHELL", "curl -s http://localhost:9200/_cluster/health | grep -q 'yellow\\|green'"]
       interval: 10s
@@ -65,3 +68,4 @@ services:
 
 volumes:
   postgres_data:
+  es_data:

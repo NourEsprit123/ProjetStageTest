@@ -162,7 +162,7 @@ const [currentPage, setCurrentPage] = useState<number>(1);
                     <div
                       key={product.id || `product-${idx}`}
                       className="bg-white rounded-xl shadow hover:shadow-lg transition cursor-pointer overflow-hidden border border-gray-100"
-                      onClick={() => router.push(`/product/${encodeURIComponent(product.id)}?search=${encodeURIComponent(search)}&category=${encodeURIComponent(category)}`)}
+                      onClick={() => router.push(`/product/${encodeURIComponent(product.url)}?search=${encodeURIComponent(search)}&category=${encodeURIComponent(category)}`)}
                     >
                       {product.image && (
                         <img
