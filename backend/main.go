@@ -1,13 +1,15 @@
 package main
 
+// Dans main.go, assurez-vous d'avoir cet import pour que le driver Postgres soit chargé
 import (
-	"log"
-	"net/http"
-	"tunisianet-scraper/database"
-	"tunisianet-scraper/handlers"
+    "log"
+    "net/http"
+    "tunisianet-scraper/database"
+    "tunisianet-scraper/handlers"
 
-	"github.com/labstack/echo/v4"
-	"github.com/labstack/echo/v4/middleware"
+    _ "github.com/lib/pq" // <--- Ajoutez cette ligne avec le underscore devant
+    "github.com/labstack/echo/v4"
+    "github.com/labstack/echo/v4/middleware"
 )
 
 func main() {
@@ -33,6 +35,8 @@ func main() {
 	e.GET("/api/products", handlers.GetProductsFromDB(db, es))
 	e.GET("/api/products/:id", handlers.GetProductDetail(db))
 	e.GET("/api/categories", handlers.GetCategories)
+	// Enregistrez la nouvelle route
+    e.GET("/api/autocomplete", handlers.GetAutocompleteSuggestions(es))
 
 	// Endpoint pour forcer la migration manuellement si besoin
 	e.POST("/api/migrate-es", func(c echo.Context) error {

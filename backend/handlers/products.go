@@ -12,6 +12,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"fmt"
 
 	"github.com/elastic/go-elasticsearch/v8"
 	"github.com/labstack/echo/v4"
@@ -20,7 +21,8 @@ import (
 	"tunisianet-scraper/scraper"
 )
 
-// Nettoie le prix pour le convertir en format numérique (ex: "1.250 DT" -> "1.250")
+// ─── Utilitaires ────────────────────────────────────────────────────────────
+
 func cleanPrice(priceStr string) string {
 	priceStr = strings.ReplaceAll(priceStr, ",", ".")
 	reg := regexp.MustCompile(`[^0-9.]`)
@@ -32,22 +34,14 @@ func cleanPrice(priceStr string) string {
 	return cleaned
 }
 
-// Vérifie si la requête ressemble à une référence produit (alphanumérique)
-func isReference(query string) bool {
-	query = strings.TrimSpace(query)
-	reg := regexp.MustCompile(`^[A-Za-z0-9\-_\.]{3,}$`)
-	return reg.MatchString(query)
-}
-
-// Normalise une chaîne pour servir de clé de cache stable (utilisée
-// comme "reference" quand on sauvegarde les produits scrapés).
 func normalizeCacheKey(s string) string {
 	s = strings.ToLower(strings.TrimSpace(s))
-	s = strings.Join(strings.Fields(s), " ") // espaces multiples -> un seul
+	s = strings.Join(strings.Fields(s), " ")
 	return s
 }
 
-// Sauvegarde ou met à jour le produit en Postgres
+// ─── Sauvegarde ─────────────────────────────────────────────────────────────
+
 func SaveOrUpdateProduct(db *sql.DB, es *elasticsearch.Client, p models.Product, category string, reference string) error {
 	p.Reference = strings.TrimSpace(reference)
 	p.Category = category
@@ -57,11 +51,11 @@ func SaveOrUpdateProduct(db *sql.DB, es *elasticsearch.Client, p models.Product,
 	VALUES ($1, $2, $3, $4, $5, $6, $7, NOW())
 	ON CONFLICT (url)
 	DO UPDATE SET
-		price     = EXCLUDED.price,
-		name      = EXCLUDED.name,
-		image_url = EXCLUDED.image_url,
-		category  = EXCLUDED.category,
-		reference = EXCLUDED.reference,
+		price      = EXCLUDED.price,
+		name       = EXCLUDED.name,
+		image_url  = EXCLUDED.image_url,
+		category   = EXCLUDED.category,
+		reference  = EXCLUDED.reference,
 		updated_at = NOW();`
 
 	_, err := db.Exec(query, p.Name, p.Price, p.URL, p.Image, p.Source, p.Category, p.Reference)
@@ -74,35 +68,35 @@ func SaveOrUpdateProduct(db *sql.DB, es *elasticsearch.Client, p models.Product,
 		db.Exec("INSERT INTO price_history (product_url, price) VALUES ($1, $2)", p.URL, numericPrice)
 	}
 
-	// Indexation SYNCHRONE dans ES.
-	// ⚠️ IMPORTANT : on utilise models.DocIDFromURL(p.URL) comme _id,
-	// PAS p.URL directement, car ES rejette silencieusement (400) les IDs
-	// contenant des "/" bruts comme dans une URL complète.
+	// Indexation synchrone dans ES
 	if es != nil {
 		data, _ := json.Marshal(p)
-		res, err := es.Index("products", bytes.NewReader(data), es.Index.WithDocumentID(models.DocIDFromURL(p.URL)))
+		res, err := es.Index(
+			"products",
+			bytes.NewReader(data),
+			es.Index.WithDocumentID(models.DocIDFromURL(p.URL)),
+		)
 		if err != nil {
 			log.Printf("⚠️ Erreur transport ES pour %s: %v", p.Name, err)
 		} else if res.IsError() {
 			bodyBytes, _ := io.ReadAll(res.Body)
-			log.Printf("⚠️ ES a rejeté le document '%s': status=%d body=%s", p.Name, res.StatusCode, string(bodyBytes))
+			log.Printf("⚠️ ES rejeté '%s': %s", p.Name, string(bodyBytes))
 			res.Body.Close()
 		} else {
 			res.Body.Close()
 		}
 	}
+
 	return nil
 }
 
-// Scrape les sites et filtre les résultats pour ne garder que ceux correspondant à la référence
+// ─── Scraping à la demande ──────────────────────────────────────────────────
+
 func scrapeByReference(db *sql.DB, es *elasticsearch.Client, reference string, category string) []models.Product {
 	var allProducts []models.Product
 	var mu sync.Mutex
 	var wg sync.WaitGroup
 
-	// Clé de cache normalisée : c'est CETTE valeur qui est sauvegardée comme
-	// "reference" en base et dans ES, donc c'est aussi celle qu'on doit
-	// utiliser pour chercher au prochain appel identique.
 	cacheKey := normalizeCacheKey(reference)
 
 	sources := []struct {
@@ -132,9 +126,7 @@ func scrapeByReference(db *sql.DB, es *elasticsearch.Client, reference string, c
 
 			for _, p := range products {
 				p.Source = source.name
-
 				log.Printf("📥 Tentative de sauvegarde : %s", p.Name)
-
 				err := SaveOrUpdateProduct(db, es, p, category, cacheKey)
 				if err != nil {
 					log.Printf("❌ ERREUR SAUVEGARDE : %v", err)
@@ -147,135 +139,135 @@ func scrapeByReference(db *sql.DB, es *elasticsearch.Client, reference string, c
 			}
 		}(s)
 	}
+
 	wg.Wait()
 	log.Printf("🏁 Scraping terminé. Produits trouvés et sauvés : %d", len(allProducts))
 	return allProducts
 }
 
-// Recherche dans ES : utilise "filter" pour une recherche stricte sur référence
-// et applique aussi le filtre de catégorie quand il est fourni.
+// ─── Recherche Elasticsearch ─────────────────────────────────────────────────
+
 func searchViaElasticsearch(es *elasticsearch.Client, db *sql.DB, query string, category string) []models.Product {
 	if es == nil {
-		log.Printf("🔎 [ES DEBUG][v3] client ES nil")
 		return nil
 	}
 
-	q := normalizeCacheKey(query)
-	if q == "" {
-		return nil
-	}
-
-	filters := []map[string]interface{}{}
-	if category != "" {
-		filters = append(filters, map[string]interface{}{
-			"term": map[string]interface{}{"category": category},
-		})
-	}
-
-	var mainClause map[string]interface{}
-	if isReference(q) {
-		filters = append(filters, map[string]interface{}{
-			"term": map[string]interface{}{"reference.keyword": q},
-		})
-		mainClause = map[string]interface{}{"match_all": map[string]interface{}{}}
-	} else {
-		mainClause = map[string]interface{}{
-			"match": map[string]interface{}{
-				"name": map[string]interface{}{"query": q, "fuzziness": "AUTO"},
-			},
-		}
-	}
-
+	var buf bytes.Buffer
+	// Configuration de la recherche plus stricte avec 'AND'
 	esQuery := map[string]interface{}{
 		"query": map[string]interface{}{
 			"bool": map[string]interface{}{
-				"must":   mainClause,
-				"filter": filters,
+				"must": []interface{}{ // Utilisation de 'must' pour AND strict
+					map[string]interface{}{
+						"match": map[string]interface{}{
+							"name": map[string]interface{}{
+								"query":                query,
+								"operator":             "and", // Force la correspondance de TOUS les mots
+								"minimum_should_match": "100%",
+								"fuzziness":            "AUTO:3,6",
+								"boost":                3,
+							},
+						},
+					},
+				},
 			},
 		},
 		"size": 200,
 	}
 
-	var buf bytes.Buffer
+	if category != "" {
+		esQuery["query"].(map[string]interface{})["bool"].(map[string]interface{})["filter"] = map[string]interface{}{
+			"term": map[string]interface{}{
+				"category": strings.ToLower(category),
+			},
+		}
+	}
+
 	json.NewEncoder(&buf).Encode(esQuery)
 
-	log.Printf("🔎 [ES DEBUG][v3] query envoyée: %s", buf.String())
-
-	res, err := es.Search(es.Search.WithIndex("products"), es.Search.WithBody(&buf))
+	res, err := es.Search(
+		es.Search.WithIndex("products"),
+		es.Search.WithBody(&buf),
+	)
 	if err != nil {
-		log.Printf("⚠️ [ES DEBUG][v3] erreur recherche ES: %v", err)
+		log.Printf("⚠️ Erreur ES: %v", err)
 		return nil
 	}
 	defer res.Body.Close()
 
-	if res.IsError() {
-		log.Printf("⚠️ [ES DEBUG][v3] réponse ES en erreur: %s", res.String())
-		return nil
-	}
-
+	bodyBytes, _ := io.ReadAll(res.Body)
 	var r map[string]interface{}
-	if err := json.NewDecoder(res.Body).Decode(&r); err != nil {
-		log.Printf("⚠️ [ES DEBUG][v3] erreur décodage réponse: %v", err)
-		return nil
-	}
+	json.Unmarshal(bodyBytes, &r)
 
 	hitsWrapper, ok := r["hits"].(map[string]interface{})
 	if !ok {
-		log.Printf("⚠️ [ES DEBUG][v3] pas de champ 'hits' dans la réponse: %+v", r)
 		return nil
 	}
 	hits, ok := hitsWrapper["hits"].([]interface{})
-	if !ok {
-		log.Printf("⚠️ [ES DEBUG][v3] hits.hits n'est pas un tableau")
+	if !ok || len(hits) == 0 {
 		return nil
 	}
 
-	log.Printf("🔎 [ES DEBUG][v3] nombre de hits ES: %d", len(hits))
-
-	if len(hits) == 0 {
-		return nil
+	type esHit struct {
+		url   string
+		score float64
 	}
+	var esHits []esHit
+	scoreMap := map[string]float64{}
 
-	var urls []string
 	for _, hit := range hits {
-		src, ok := hit.(map[string]interface{})["_source"].(map[string]interface{})
-		if !ok {
-			continue
-		}
-		if u, ok := src["url"].(string); ok && u != "" {
-			urls = append(urls, u)
+		h, _ := hit.(map[string]interface{})
+		score, _ := h["_score"].(float64)
+		src, _ := h["_source"].(map[string]interface{})
+		
+		// FILTRE : On ignore les résultats avec un score trop bas (ex: < 5.0)
+		if u, _ := src["url"].(string); u != "" && score > 5.0 {
+			esHits = append(esHits, esHit{url: u, score: score})
+			scoreMap[u] = score
 		}
 	}
-	if len(urls) == 0 {
-		log.Printf("⚠️ [ES DEBUG][v3] hits trouvés mais aucune URL extraite")
+
+	if len(esHits) == 0 {
 		return nil
 	}
 
-	rows, err := db.Query(
-		"SELECT id, name, price, url, image_url, source, category, reference FROM products WHERE url = ANY($1)",
-		pq.Array(urls),
-	)
+	log.Printf("⚡ [ES] %d résultats pertinents pour '%s' (score max: %.2f)", len(esHits), query, esHits[0].score)
+
+	// Suite du code pour récupérer les détails depuis PostgreSQL
+	urls := make([]string, len(esHits))
+	for i, h := range esHits {
+		urls[i] = h.url
+	}
+
+	sqlStr := `SELECT id, name, price, url, image_url, source, category FROM products WHERE url = ANY($1)`
+	args := []interface{}{pq.Array(urls)}
+	
+	rows, err := db.Query(sqlStr, args...)
 	if err != nil {
-		log.Printf("⚠️ [ES DEBUG][v3] erreur requête Postgres: %v", err)
 		return nil
 	}
 	defer rows.Close()
 
-	var products []models.Product
+	productMap := map[string]models.Product{}
 	for rows.Next() {
 		var p models.Product
-		if err := rows.Scan(&p.ID, &p.Name, &p.Price, &p.URL, &p.Image, &p.Source, &p.Category, &p.Reference); err == nil {
+		if err := rows.Scan(&p.ID, &p.Name, &p.Price, &p.URL, &p.Image, &p.Source, &p.Category); err == nil {
+			p.Score = scoreMap[p.URL]
+			productMap[p.URL] = p
+		}
+	}
+
+	var products []models.Product
+	for _, h := range esHits {
+		if p, ok := productMap[h.url]; ok {
 			products = append(products, p)
 		}
 	}
-	log.Printf("🔎 [ES DEBUG][v3] produits récupérés depuis Postgres: %d", len(products))
 	return products
 }
 
-// Récupération PAGINÉE par catégorie, avec le total réel de produits.
-// Remplace l'ancienne fetchFromPostgresByCategory qui avait un LIMIT 100 fixe
-// (ce qui donnait toujours 5 pages de pagination côté frontend, peu importe
-// le nombre réel de produits dans la catégorie).
+// ─── Récupération par catégorie paginée ──────────────────────────────────────
+
 func fetchFromPostgresByCategoryPaginated(db *sql.DB, category string, page int, limit int) ([]models.Product, int, error) {
 	offset := (page - 1) * limit
 
@@ -289,7 +281,7 @@ func fetchFromPostgresByCategoryPaginated(db *sql.DB, category string, page int,
 	}
 
 	rows, err := db.Query(
-		`SELECT id, name, price, url, image_url, source, category, reference
+		`SELECT id, name, price, url, image_url, source, category
 		 FROM products
 		 WHERE LOWER(category) = $1
 		 ORDER BY updated_at DESC
@@ -304,17 +296,18 @@ func fetchFromPostgresByCategoryPaginated(db *sql.DB, category string, page int,
 	var products []models.Product
 	for rows.Next() {
 		var p models.Product
-		if err := rows.Scan(&p.ID, &p.Name, &p.Price, &p.URL, &p.Image, &p.Source, &p.Category, &p.Reference); err == nil {
+		if err := rows.Scan(&p.ID, &p.Name, &p.Price, &p.URL, &p.Image, &p.Source, &p.Category); err == nil {
 			products = append(products, p)
 		}
 	}
 	return products, totalCount, nil
 }
 
-// Handler Echo pour l'API
+// ─── Handlers Echo ───────────────────────────────────────────────────────────
+
 func GetProductsFromDB(db *sql.DB, es *elasticsearch.Client) echo.HandlerFunc {
 	return func(c echo.Context) error {
-		query := c.QueryParam("search")
+		query    := c.QueryParam("search")
 		category := c.QueryParam("category")
 
 		page := 1
@@ -330,45 +323,60 @@ func GetProductsFromDB(db *sql.DB, es *elasticsearch.Client) echo.HandlerFunc {
 			}
 		}
 
-		// 1. Recherche textuelle -> cache ES (comportement inchangé)
+		// Recherche textuelle → ES
 		if strings.TrimSpace(query) != "" {
 			results := searchViaElasticsearch(es, db, query, category)
 			if len(results) > 0 {
-				log.Printf("⚡ [Cache] %d produits trouvés via ES pour '%s'", len(results), query)
+				log.Printf("⚡ [Cache] %d produits via ES pour '%s'", len(results), query)
 				return c.JSON(http.StatusOK, map[string]interface{}{
 					"products":    results,
 					"total_count": len(results),
+					"total_pages": 1,
 					"from_cache":  true,
 				})
 			}
 
-			log.Printf("🔍 [Scraping] Aucun résultat en cache pour '%s'. Démarrage du scraper...", query)
-			scraped := scrapeByReference(db, es, query, category)
-			return c.JSON(http.StatusOK, map[string]interface{}{
-				"products":    scraped,
-				"total_count": len(scraped),
-				"from_cache":  false,
+			// Cache miss → scraping en arrière-plan
+			log.Printf("🔍 [Scraping] '%s' non trouvé → scraping...", query)
+			go scrapeByReference(db, es, query, category)
+
+			return c.JSON(http.StatusAccepted, map[string]interface{}{
+				"message":     "Recherche en cours, réessayez dans quelques secondes...",
+				"products":    []models.Product{},
+				"total_count": 0,
+				"total_pages": 1,
 			})
 		}
 
-		// 2. Navigation par catégorie seule -> pagination serveur, rapide et complète
+		// Navigation par catégorie → PostgreSQL paginé
 		if category != "" {
 			products, totalCount, err := fetchFromPostgresByCategoryPaginated(db, category, page, limit)
 			if err != nil {
 				return c.JSON(http.StatusInternalServerError, map[string]string{"error": "Erreur serveur"})
 			}
-			log.Printf("⚡ [Cache catégorie] %d/%d produits (page %d) pour '%s'", len(products), totalCount, page, category)
+
+			totalPages := (totalCount + limit - 1) / limit
+			if totalPages == 0 {
+				totalPages = 1
+			}
+
+			log.Printf("⚡ [Catégorie] %d/%d produits (page %d) pour '%s'", len(products), totalCount, page, category)
+
 			return c.JSON(http.StatusOK, map[string]interface{}{
 				"products":    products,
 				"total_count": totalCount,
 				"page":        page,
 				"limit":       limit,
+				"total_pages": totalPages,
 				"from_cache":  true,
 			})
 		}
 
-		// 3. Ni query ni catégorie -> rien à faire
-		return c.JSON(http.StatusOK, map[string]interface{}{"products": []models.Product{}, "total_count": 0, "from_cache": true})
+		return c.JSON(http.StatusOK, map[string]interface{}{
+			"products":    []models.Product{},
+			"total_count": 0,
+			"total_pages": 1,
+		})
 	}
 }
 
@@ -395,7 +403,49 @@ func GetProductDetail(db *sql.DB) echo.HandlerFunc {
 	}
 }
 
-// Handler pour les catégories
 func GetCategories(c echo.Context) error {
 	return c.JSON(http.StatusOK, map[string]interface{}{"categories": scraper.GetCategories()})
+}
+
+
+
+func GetAutocompleteSuggestions(es *elasticsearch.Client) echo.HandlerFunc {
+    return func(c echo.Context) error {
+        query := c.QueryParam("q")
+        if query == "" {
+            return c.JSON(http.StatusOK, []string{})
+        }
+
+        // Requête Elasticsearch pour suggérer les noms de produits
+        // Utilisation de match_phrase_prefix pour l'autocomplete
+        searchQuery := fmt.Sprintf(`{
+            "query": {
+                "match_phrase_prefix": {
+                    "name": "%s"
+                }
+            },
+            "size": 5,
+            "_source": ["name"]
+        }`, query)
+
+        res, err := es.Search(
+            es.Search.WithIndex("products"),
+            es.Search.WithBody(strings.NewReader(searchQuery)),
+        )
+        if err != nil || res.IsError() {
+            return c.JSON(http.StatusInternalServerError, "Erreur ES")
+        }
+        defer res.Body.Close()
+
+        var r map[string]interface{}
+        json.NewDecoder(res.Body).Decode(&r)
+
+        var suggestions []string
+        for _, hit := range r["hits"].(map[string]interface{})["hits"].([]interface{}) {
+            name := hit.(map[string]interface{})["_source"].(map[string]interface{})["name"].(string)
+            suggestions = append(suggestions, name)
+        }
+
+        return c.JSON(http.StatusOK, suggestions)
+    }
 }

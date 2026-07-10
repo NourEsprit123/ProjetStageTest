@@ -6,21 +6,11 @@ import (
 	"io"
 	"net/http"
 	"net/url"
-	"time"
 	"strings"
+	"time"
 
 	"tunisianet-scraper/models"
 )
-
-type MytekAPIProduct struct {
-	ID    string  `json:"id"`
-	Sku   string  `json:"sku"`
-	Name  string  `json:"name"`
-	Price float64 `json:"price"`
-	URL   string  `json:"url"`
-	Image string  `json:"image"`
-	Stock int     `json:"stock_status"`
-}
 
 var mytekCategoryKeywords = map[string]string{
 	"smartphones":          "telephone",
@@ -38,9 +28,6 @@ func ScrapeMytekProducts(query string, category string) ([]models.Product, error
 	var allProducts []models.Product
 	client := &http.Client{Timeout: 15 * time.Second}
 
-	// 1. Logique de priorité :
-	// Si une catégorie est définie, on force le mot-clé correspondant.
-	// On ignore la 'query' car elle vient souvent d'une recherche textuelle globale.
 	searchQuery := ""
 	if category != "" {
 		if kw, ok := mytekCategoryKeywords[category]; ok {
@@ -49,26 +36,19 @@ func ScrapeMytekProducts(query string, category string) ([]models.Product, error
 			searchQuery = category
 		}
 	} else if query != "" {
-		// On n'utilise la query que si aucune catégorie n'est précisée
 		searchQuery = query
 	} else {
-		searchQuery = "pc" // Valeur de repli
+		searchQuery = "pc"
 	}
 
 	fmt.Printf("🔍 [Mytek API] Lancement pour: '%s' | Catégorie: '%s'\n", searchQuery, category)
 
-	for page := 1; page <= 5; page++ {
+	for page := 1; page <= 3; page++ {
 		products, err := fetchMytekAPIPage(client, searchQuery, category, page)
-		if err != nil {
-			break
-		}
-		if len(products) == 0 {
+		if err != nil || len(products) == 0 {
 			break
 		}
 
-		// 2. FILTRAGE POST-RÉCUPÉRATION
-		// Même si l'API Mytek renvoie des résultats, on vérifie manuellement 
-		// si le nom du produit contient bien le mot-clé de la catégorie.
 		if category != "" {
 			for _, p := range products {
 				if strings.Contains(strings.ToLower(p.Name), strings.ToLower(searchQuery)) {
@@ -78,12 +58,12 @@ func ScrapeMytekProducts(query string, category string) ([]models.Product, error
 		} else {
 			allProducts = append(allProducts, products...)
 		}
-
 		time.Sleep(1 * time.Second)
 	}
 
 	return allProducts, nil
 }
+
 func fetchMytekAPIPage(client *http.Client, query string, category string, page int) ([]models.Product, error) {
 	var results []models.Product
 
@@ -92,34 +72,21 @@ func fetchMytekAPIPage(client *http.Client, query string, category string, page 
 		url.QueryEscape(query), page,
 	)
 
-	req, err := http.NewRequest("GET", apiURL, nil)
-	if err != nil {
-		return nil, err
-	}
-
-	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36")
-	req.Header.Set("Accept", "application/json, text/plain, */*")
-	req.Header.Set("X-Requested-With", "XMLHttpRequest")
+	req, _ := http.NewRequest("GET", apiURL, nil)
+	req.Header.Set("User-Agent", "Mozilla/5.0")
+	req.Header.Set("Accept", "application/json")
 
 	resp, err := client.Do(req)
-	if err != nil {
+	if err != nil || resp.StatusCode != http.StatusOK {
 		return nil, err
 	}
 	defer resp.Body.Close()
 
-	if resp.StatusCode != http.StatusOK {
-		return fetchMytekViaStaticParsing(client, query, page)
-	}
-
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, err
-	}
+	body, _ := io.ReadAll(resp.Body)
 
 	var data struct {
 		Items []struct {
 			ID               int     `json:"id"`
-			SKU              string  `json:"sku"`
 			Name             string  `json:"name"`
 			Price            float64 `json:"price"`
 			CustomAttributes []struct {
@@ -130,7 +97,7 @@ func fetchMytekAPIPage(client *http.Client, query string, category string, page 
 	}
 
 	if err := json.Unmarshal(body, &data); err != nil {
-		return fetchMytekViaStaticParsing(client, query, page)
+		return nil, err
 	}
 
 	for _, item := range data.Items {
@@ -138,32 +105,39 @@ func fetchMytekAPIPage(client *http.Client, query string, category string, page 
 			ID:       fmt.Sprintf("mytek-%d", item.ID),
 			Name:     item.Name,
 			Price:    fmt.Sprintf("%.2f TND", item.Price),
-			InStock:  true,
 			Category: category,
+			Source:   "mytek",
+			InStock:  false, // Valeur par défaut prudente
 		}
 
 		for _, attr := range item.CustomAttributes {
-			if attr.AttributeCode == "image" {
+			switch attr.AttributeCode {
+			case "image":
 				if valStr, ok := attr.Value.(string); ok {
 					p.Image = "https://www.mytek.tn/media/catalog/product" + valStr
 				}
-			}
-			if attr.AttributeCode == "url_key" {
+			case "url_key":
 				if valStr, ok := attr.Value.(string); ok {
 					p.URL = "https://www.mytek.tn/" + valStr + ".html"
+				}
+			case "quantity_and_stock_status":
+				// Extraction complexe du statut stock
+				if stockMap, ok := attr.Value.(map[string]interface{}); ok {
+					if is_in_stock, exists := stockMap["is_in_stock"]; exists {
+						// Magento renvoie souvent 1 pour true
+						if val, ok := is_in_stock.(bool); ok {
+							p.InStock = val
+						} else if valFloat, ok := is_in_stock.(float64); ok {
+							p.InStock = (valFloat == 1)
+						}
+					}
 				}
 			}
 		}
 
-		if p.Name != "" {
-			results = append(results, p)
-		}
+		fmt.Printf("DEBUG: %s | En stock: %v\n", p.Name, p.InStock)
+		results = append(results, p)
 	}
 
-	fmt.Printf("[Mytek API Debug] %d produits extraits (Page %d).\n", len(results), page)
 	return results, nil
-}
-
-func fetchMytekViaStaticParsing(client *http.Client, term string, page int) ([]models.Product, error) {
-	return []models.Product{}, nil
 }
