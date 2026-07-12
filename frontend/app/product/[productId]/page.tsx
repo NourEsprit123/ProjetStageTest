@@ -28,7 +28,7 @@ export default function ProductDetail() {
 
     console.log("Fetching product with ID:", productId);
 
-    fetch(`http://localhost:8080/api/products/${productId}`)
+    fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/products/${productId}`)
       .then(res => {
         if (!res.ok) throw new Error(`Erreur serveur: ${res.status}`);
         return res.json();

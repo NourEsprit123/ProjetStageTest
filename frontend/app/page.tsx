@@ -74,7 +74,7 @@ export default function Home() {
       const params = new URLSearchParams();
       if (term) params.append('search', term);
       if (category) params.append('category', category);
-      const res = await fetch(`http://localhost:8080/api/products?${params}`);
+      const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/products?${params}`);
       const data = await res.json();
       setAllProducts(data.products || []);
     } catch (err) {
