@@ -4,21 +4,29 @@ import (
 	"database/sql"
 	"fmt"
 	"log"
+	"os"
 
 	_ "github.com/lib/pq"
 )
 
 func InitDB() *sql.DB {
-	host     := "db"
-	port     := 5432
-	user     := "postgres"
-	password := "nour"
-	dbname   := "postgres"
+	// 1. On essaie d'abord de récupérer la chaîne de connexion de Render (Neon)
+	connStr := os.Getenv("DB_URL")
 
-	connStr := fmt.Sprintf(
-		"host=%s port=%d user=%s password=%s dbname=%s sslmode=disable",
-		host, port, user, password, dbname,
-	)
+	// 2. Si elle est vide, on utilise la configuration locale par défaut (Docker Compose)
+	if connStr == "" {
+		log.Println("⚠️ DB_URL non trouvée, utilisation de la configuration locale...")
+		host := "db"
+		port := 5432
+		user := "postgres"
+		password := "nour"
+		dbname := "postgres"
+
+		connStr = fmt.Sprintf(
+			"host=%s port=%d user=%s password=%s dbname=%s sslmode=disable",
+			host, port, user, password, dbname,
+		)
+	}
 
 	db, err := sql.Open("postgres", connStr)
 	if err != nil {
@@ -56,6 +64,6 @@ func InitDB() *sql.DB {
 		log.Fatalf("❌ Erreur création tables: %v", err)
 	}
 
-	log.Println("🚀 Connecté à PostgreSQL !")
+	log.Println("🚀 Connecté à PostgreSQL avec succès !")
 	return db
 }
