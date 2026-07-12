@@ -54,8 +54,8 @@ services:
         condition: service_healthy
       elasticsearch:
         condition: service_healthy
-      nlp-service:
-        condition: service_started
+      #nlp-service:
+       # condition: service_started
     environment:
       - DB_URL=postgres://postgres:nour@db:5432/postgres?sslmode=disable
     restart: unless-stopped
@@ -77,12 +77,12 @@ services:
     networks:
       - app-network
 
-  nlp-service:
-    build: ./nlp-service
-    container_name: nlp-service
-    restart: unless-stopped
-    networks:
-      - app-network
+  #nlp-service:
+   # build: ./nlp-service
+    #container_name: nlp-service
+    #restart: unless-stopped
+    #networks:
+     # - app-network
 
 networks:
   app-network:
