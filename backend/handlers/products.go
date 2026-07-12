@@ -1,4 +1,4 @@
-package handlers
+﻿package handlers
 
 import (
 	"net/http"
@@ -186,33 +186,24 @@ func GetProducts(c echo.Context) error {
 	broadSearch := limitQueryWords(cleanedSearch, 3)
 	allProducts := scrapeAllSources(broadSearch, category)
 
-	// --- AJOUT DU DEBUG ICI ---
 	println("--- DEBUG FILTRAGE ---")
-	println("Recherche nettoyée cible :", cleanedSearch)
-	println("Nombre total de produits reçus des scrapers :", len(allProducts))
-	// ---------------------------
+	println("Nombre total de produits reçus :", len(allProducts))
 
 	var filteredProducts []models.Product
 	for _, p := range allProducts {
-		matchQ := matchesQuery(p, cleanedSearch)
-		matchC := matchesCategory(p, category)
-		
-		// Décommente la ligne ci-dessous si tu veux voir le comportement de chaque produit :
-		// fmt.Printf("Produit: %s | MatchQuery: %t | MatchCategory: %t\n", p.Name, matchQ, matchC)
-
-		if matchQ && matchC && !isBlacklisted(p.Name) {
+		// On supprime matchQ et matchC pour tout garder
+		if !isBlacklisted(p.Name) {
 			filteredProducts = append(filteredProducts, p)
 		}
 	}
 
-	println("Nombre de produits après filtrage :", len(filteredProducts))
+	println("Nombre de produits après filtrage (blacklist uniquement) :", len(filteredProducts))
 	println("----------------------")
 
 	return c.JSON(http.StatusOK, map[string]interface{}{
 		"products": filteredProducts,
 	})
 }
-
 func GetCategories(c echo.Context) error {
 	categories := scraper.GetCategories()
 	return c.JSON(http.StatusOK, map[string]interface{}{

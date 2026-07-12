@@ -20,9 +20,33 @@ import (
 // https://www.tunisianet.com.tn (menu "Toutes nos catégories"), puis en copiant
 // l'URL exacte affichée dans la barre d'adresse pour chaque catégorie.
 var categories = map[string]string{
-	"informatique":         "https://www.tunisianet.com.tn/301-informatique",         // confirmé OK
-	"smartphones":          "https://www.tunisianet.com.tn/596-smartphone-tunisie",    // confirmé OK
-	"telephonie portables": "https://www.tunisianet.com.tn/377-telephone-portable-tunisie", // confirmé OK
+	// Informatique & matériel
+	"informatique":         "https://www.tunisianet.com.tn/301-informatique",
+	"composants":           "https://www.tunisianet.com.tn/305-composants-pc-tunisie",
+	"ordinateurs":          "https://www.tunisianet.com.tn/302-ordinateurs-portables",
+	"reseaux":              "https://www.tunisianet.com.tn/306-reseaux-informatiques",
+	"peripheriques":        "https://www.tunisianet.com.tn/309-peripheriques-informatiques",
+	"stockage":             "https://www.tunisianet.com.tn/307-stockage",
+
+	// Téléphonie
+	"smartphones":          "https://www.tunisianet.com.tn/596-smartphone-tunisie",
+	"telephonie portables": "https://www.tunisianet.com.tn/377-telephone-portable-tunisie",
+	"accessoires telephonie":"https://www.tunisianet.com.tn/379-accessoires-telephonie",
+	"telephones fixes":     "https://www.tunisianet.com.tn/378-telephone-fixe-tunisie",
+	"smartwatch":           "https://www.tunisianet.com.tn/624-montres-connectees",
+
+	// Santé & Beauté
+	"sante beaute":         "https://www.tunisianet.com.tn/469-sante-beaute",
+	"soins personnels":     "https://www.tunisianet.com.tn/471-soins-personnels",
+	"moniteurs sante":      "https://www.tunisianet.com.tn/470-moniteurs-de-sante",
+
+	// Électroménager
+	"electromenager":       "https://www.tunisianet.com.tn/238-electromenager-tunisie",
+	"aspirateurs":          "https://www.tunisianet.com.tn/243-aspirateur-tunisie",
+	"machine a laver":      "https://www.tunisianet.com.tn/241-lave-linge-tunisie",
+	"seche linge":          "https://www.tunisianet.com.tn/634-seche-linge",
+	"lave vaisselle":       "https://www.tunisianet.com.tn/242-lave-vaisselle-tunisie",
+	"fours":                "https://www.tunisianet.com.tn/250-fours-encastrables",
 }
 
 func getHTTPClient() *http.Client {
@@ -31,7 +55,7 @@ func getHTTPClient() *http.Client {
 			InsecureSkipVerify: true,
 		},
 		DialContext: (&net.Dialer{
-			Timeout:   30 * time.Second,
+			Timeout:   90 * time.Second,
 			KeepAlive: 30 * time.Second,
 		}).DialContext,
 		TLSHandshakeTimeout:   30 * time.Second,
