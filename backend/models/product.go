@@ -18,6 +18,7 @@ type Product struct {
 	Score       float64 `json:"score"`
 	UpdatedAt string  `json:"updated_at"`
 	 Reference   string  `json:"reference"`
+	 Vector []float32 `json:"vector,omitempty"`
 }
 
 type SearchRequest struct {

@@ -42,54 +42,76 @@ func normalizeCacheKey(s string) string {
 
 // ─── Sauvegarde ─────────────────────────────────────────────────────────────
 
-func SaveOrUpdateProduct(db *sql.DB, es *elasticsearch.Client, p models.Product, category string, reference string) error {
-	p.Reference = strings.TrimSpace(reference)
-	p.Category = category
-
-	query := `
-	INSERT INTO products (name, price, url, image_url, source, category, reference, updated_at)
-	VALUES ($1, $2, $3, $4, $5, $6, $7, NOW())
-	ON CONFLICT (url)
-	DO UPDATE SET
-		price      = EXCLUDED.price,
-		name       = EXCLUDED.name,
-		image_url  = EXCLUDED.image_url,
-		category   = EXCLUDED.category,
-		reference  = EXCLUDED.reference,
-		updated_at = NOW();`
-
-	_, err := db.Exec(query, p.Name, p.Price, p.URL, p.Image, p.Source, p.Category, p.Reference)
-	if err != nil {
-		return err
-	}
-
-	numericPrice := cleanPrice(p.Price)
-	if numericPrice != "" {
-		db.Exec("INSERT INTO price_history (product_url, price) VALUES ($1, $2)", p.URL, numericPrice)
-	}
-
-	// Indexation synchrone dans ES
-	if es != nil {
-		data, _ := json.Marshal(p)
-		res, err := es.Index(
-			"products",
-			bytes.NewReader(data),
-			es.Index.WithDocumentID(models.DocIDFromURL(p.URL)),
-		)
-		if err != nil {
-			log.Printf("⚠️ Erreur transport ES pour %s: %v", p.Name, err)
-		} else if res.IsError() {
-			bodyBytes, _ := io.ReadAll(res.Body)
-			log.Printf("⚠️ ES rejeté '%s': %s", p.Name, string(bodyBytes))
-			res.Body.Close()
-		} else {
-			res.Body.Close()
-		}
-	}
-
-	return nil
+// Utilitaire de normalisation
+func normalizeString(s string) string {
+    s = strings.ToLower(s)
+    reg := regexp.MustCompile(`[^a-z0-9\s]`)
+    s = reg.ReplaceAllString(s, "")
+    return strings.Join(strings.Fields(s), " ")
 }
 
+func SaveOrUpdateProduct(db *sql.DB, es *elasticsearch.Client, p models.Product, category string, reference string) error {
+    p.Reference = strings.TrimSpace(reference)
+    p.Category = category
+
+    // 1. Normalisation du nom
+    normalizedName := normalizeString(p.Name)
+
+    // 2. Insertion/Update dans PostgreSQL
+    query := `
+    INSERT INTO products (name, price, url, image_url, source, category, reference, updated_at)
+    VALUES ($1, $2, $3, $4, $5, $6, $7, NOW())
+    ON CONFLICT (url)
+    DO UPDATE SET
+        price      = EXCLUDED.price,
+        name       = EXCLUDED.name,
+        image_url  = EXCLUDED.image_url,
+        category   = EXCLUDED.category,
+        reference  = EXCLUDED.reference,
+        updated_at = NOW();`
+
+    _, err := db.Exec(query, normalizedName, p.Price, p.URL, p.Image, p.Source, p.Category, p.Reference)
+    if err != nil {
+        return err
+    }
+
+    numericPrice := cleanPrice(p.Price)
+    if numericPrice != "" {
+        db.Exec("INSERT INTO price_history (product_url, price) VALUES ($1, $2)", p.URL, numericPrice)
+    }
+
+    // 3. Indexation synchrone dans ES
+    if es != nil {
+        p.Name = normalizedName 
+        
+        // --- APPEL NLP POUR RÉCUPÉRER LE VECTEUR ---
+        vector, err := getVectorFromPython(normalizedName)
+        if err == nil {
+            p.Vector = vector // p.Vector doit exister dans votre struct Product
+        } else {
+            log.Printf("⚠️ Erreur NLP pour %s: %v", p.Name, err)
+        }
+        // -------------------------------------------
+        
+        data, _ := json.Marshal(p)
+        res, err := es.Index(
+            "products",
+            bytes.NewReader(data),
+            es.Index.WithDocumentID(models.DocIDFromURL(p.URL)),
+        )
+        if err != nil {
+            log.Printf("⚠️ Erreur transport ES pour %s: %v", p.Name, err)
+        } else if res.IsError() {
+            bodyBytes, _ := io.ReadAll(res.Body)
+            log.Printf("⚠️ ES rejeté '%s': %s", p.Name, string(bodyBytes))
+            res.Body.Close()
+        } else {
+            res.Body.Close()
+        }
+    }
+
+    return nil
+}
 // ─── Scraping à la demande ──────────────────────────────────────────────────
 
 func scrapeByReference(db *sql.DB, es *elasticsearch.Client, reference string, category string) []models.Product {
@@ -449,3 +471,21 @@ func GetAutocompleteSuggestions(es *elasticsearch.Client) echo.HandlerFunc {
         return c.JSON(http.StatusOK, suggestions)
     }
 }
+
+
+
+func getVectorFromPython(text string) ([]float32, error) {
+    jsonData, _ := json.Marshal(map[string]string{"text": text})
+    // Notez l'URL : on utilise le nom du service "nlp-service" défini dans docker-compose
+    resp, err := http.Post("http://nlp-service:8000/vectorize", "application/json", bytes.NewBuffer(jsonData))
+    if err != nil { return nil, err }
+    defer resp.Body.Close()
+    
+    var result struct { Vector []float32 `json:"vector"` }
+    json.NewDecoder(resp.Body).Decode(&result)
+    return result.Vector, nil
+}
+
+
+
+
