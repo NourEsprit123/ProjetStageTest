@@ -52,5 +52,5 @@ func main() {
 	})
 
 	log.Println("🚀 API Server démarré sur http://localhost:8080")
-	e.Logger.Fatal(e.Start(":8080"))
+	e.Logger.Fatal(e.Start(":8081"))
 }
