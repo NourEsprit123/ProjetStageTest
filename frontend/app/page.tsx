@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useRef } from 'react';
+import { useState, useRef,useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 
 interface Product {
@@ -26,6 +26,21 @@ export default function Home() {
   const [currentPage, setCurrentPage] = useState(1);
   const eventSourceRef = useRef<EventSource | null>(null);
   const router = useRouter();
+
+
+
+  // 👈 AJOUTEZ LE useEffect ICI
+  useEffect(() => {
+    const delayDebounceFn = setTimeout(() => {
+      if (search.length > 2) { 
+        handleSearch();
+      } else if (search === "") {
+        setAllProducts([]);
+      }
+    }, 500);
+
+    return () => clearTimeout(delayDebounceFn);
+  }, [search, category]);
 
  const categories = [
     { value: 'informatique', label: 'Informatique' },

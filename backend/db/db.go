@@ -54,24 +54,34 @@ func SaveProducts(products []models.Product) {
 
 func GetProductsFromDB(search, category string) ([]models.Product, error) {
     var products []models.Product
-    
-    query := "SELECT external_id, name, price, image, category, url, in_stock, source FROM products WHERE 1=1"
     var args []interface{}
     argCount := 1
 
+    // Base de la requête
+    query := "SELECT external_id, name, price, image, category, url, in_stock, source FROM products WHERE 1=1"
+
+    // Filtre catégorie
     if category != "" {
         query += fmt.Sprintf(" AND category ILIKE $%d", argCount)
         args = append(args, category)
         argCount++
     }
     
+    // Filtre recherche optimisé
     if search != "" {
-        query += fmt.Sprintf(" AND name ILIKE $%d", argCount)
-        args = append(args, "%"+search+"%")
+        // Utilise tsvector pour la pertinence linguistique et le % pour la similarité (fautes de frappe)
+        query += fmt.Sprintf(` AND (to_tsvector('french', name) @@ plainto_tsquery('french', $%d) 
+                              OR name %% $%d)`, argCount, argCount)
+        args = append(args, search)
         argCount++
+        
+        // Ajout du tri par pertinence (ts_rank) avant la limite
+        query += fmt.Sprintf(" ORDER BY ts_rank(to_tsvector('french', name), plainto_tsquery('french', $%d)) DESC", argCount-1)
+    } else {
+        query += " ORDER BY created_at DESC"
     }
-    
-    query += " ORDER BY created_at DESC LIMIT 300"
+
+    query += " LIMIT 300"
 
     rows, err := DB.Query(query, args...)
     if err != nil {
@@ -87,10 +97,6 @@ func GetProductsFromDB(search, category string) ([]models.Product, error) {
             continue
         }
         products = append(products, p)
-    }
-
-    if err = rows.Err(); err != nil {
-        return nil, err
     }
 
     return products, nil
