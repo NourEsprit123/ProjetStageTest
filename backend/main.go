@@ -1,23 +1,26 @@
 package main
 
 import (
+	"tunisianet-scraper/db"
 	"tunisianet-scraper/handlers"
 
 	"github.com/labstack/echo/v4"
-	"github.com/labstack/echo/v4/middleware" // 💡 Ne pas oublier cet import !
+	"github.com/labstack/echo/v4/middleware"
 )
 
 func main() {
+	db.InitDB()
+
 	e := echo.New()
 
-	// 💡 AJOUTE CES LIGNES ICI (Juste après avoir créé "e")
+	// Configuration CORS
 	e.Use(middleware.CORSWithConfig(middleware.CORSConfig{
-		AllowOrigins: []string{"http://localhost:3000"}, // Autorise ton frontend Next.js
+		AllowOrigins: []string{"http://localhost:3000"},
 		AllowMethods: []string{echo.GET, echo.PUT, echo.POST, echo.DELETE},
 		AllowHeaders: []string{echo.HeaderOrigin, echo.HeaderContentType, echo.HeaderAccept},
 	}))
 
-	// Tes routes actuelles...
+	// Routes
 	e.GET("/api/products", handlers.GetProducts)
 	e.GET("/api/categories", handlers.GetCategories)
 	e.GET("/api/products/:id", handlers.GetProductByID)

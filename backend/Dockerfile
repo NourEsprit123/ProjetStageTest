@@ -11,7 +11,8 @@ RUN go mod download
 COPY . .
 
 # Compiler en binaire statique (sans dépendance CGO)
-RUN CGO_ENABLED=0 GOOS=linux go build -o server main.go
+# Utilisez le point "." pour compiler tous les fichiers du projet en une fois
+RUN CGO_ENABLED=0 GOOS=linux go build -o server .
 
 # --- Étape 2 : image finale légère ---
 FROM alpine:latest

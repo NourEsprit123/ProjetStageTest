@@ -1,16 +1,15 @@
 ﻿package handlers
 
 import (
-	"net/http"
-	"regexp"
-	"strings"
-	"sync"
-
-	"github.com/labstack/echo/v4"
-	"tunisianet-scraper/models"
+    "net/http"
+    "github.com/labstack/echo/v4"
+    "tunisianet-scraper/db"
+    "tunisianet-scraper/models"
+    "regexp"
+    "strings"
 	"tunisianet-scraper/scraper"
+	"fmt"
 )
-
 var categoryKeywords = map[string][]string{
 	"smartphones":          {"smartphone", "telephone", "téléphone", "mobile", "coque", "silicone", "ecran", "écran", "galaxy", "iphone", "redmi", "honor", "vivo", "infinix"},
 	"telephonie portables": {"telephone", "téléphone", "smartphone", "mobile"},
@@ -101,50 +100,7 @@ func isBlacklisted(name string) bool {
 	return false
 }
 
-// 💡 scrapeAllSources renvoie le flux brut accumulé sans filtrage prématuré
-func scrapeAllSources(query string, category string) []models.Product {
-	var allProducts []models.Product
-	var mu sync.Mutex
-	var wg sync.WaitGroup
 
-	wg.Add(3)
-
-	// --- TUNISIANET ---
-	go func() {
-		defer wg.Done()
-		products, err := scraper.ScrapeProducts(query, category)
-		if err == nil && len(products) > 0 {
-			mu.Lock()
-			allProducts = append(allProducts, products...)
-			mu.Unlock()
-		}
-	}()
-
-	// --- MYTEK ---
-	go func() {
-		defer wg.Done()
-		products, err := scraper.ScrapeMytekProducts(query, category)
-		if err == nil && len(products) > 0 {
-			mu.Lock()
-			allProducts = append(allProducts, products...)
-			mu.Unlock()
-		}
-	}()
-
-	// --- WIKI ---
-	go func() {
-		defer wg.Done()
-		products, err := scraper.ScrapeWikiProducts(query, category)
-		if err == nil && len(products) > 0 {
-			mu.Lock()
-			allProducts = append(allProducts, products...)
-			mu.Unlock()
-		}
-	}()
-
-	wg.Wait()
-	return allProducts
-}
 
 // 💡 Limiter le nombre de mots pour éviter de saturer les moteurs internes de Mytek et Wiki
 func limitQueryWords(query string, maxWords int) string {
@@ -174,35 +130,26 @@ func cleanQueryForScrapers(query string) string {
 	return strings.Join(strings.Fields(q), " ")
 }
 
+// Remplacez votre ancienne fonction StreamProducts par celle-ci :
+
 func GetProducts(c echo.Context) error {
-	category := c.QueryParam("category")
-	search := c.QueryParam("search")
+    category := c.QueryParam("category")
+    search := c.QueryParam("search")
 
-	cleanedSearch := cleanQueryForScrapers(search)
-	if cleanedSearch == "" {
-		cleanedSearch = search
-	}
+	fmt.Printf("DEBUG: Recherche reçue - Catégorie: '%s', Search: '%s'\n", category, search) // Ajouté
 
-	broadSearch := limitQueryWords(cleanedSearch, 3)
-	allProducts := scrapeAllSources(broadSearch, category)
+    products, _ := db.GetProductsFromDB(search, category)
 
-	println("--- DEBUG FILTRAGE ---")
-	println("Nombre total de produits reçus :", len(allProducts))
+    if (len(products) == 0) && category != "" {
+        fmt.Printf("📦 Scraping à la demande pour la catégorie: %s\n", category) // 👈 utilise fmt
+        
+        scrapedProducts := scraper.ScrapeAllSources("", category)
+        db.SaveProducts(scrapedProducts)
+        
+        products, _ = db.GetProductsFromDB(search, category)
+    }
 
-	var filteredProducts []models.Product
-	for _, p := range allProducts {
-		// On supprime matchQ et matchC pour tout garder
-		if !isBlacklisted(p.Name) {
-			filteredProducts = append(filteredProducts, p)
-		}
-	}
-
-	println("Nombre de produits après filtrage (blacklist uniquement) :", len(filteredProducts))
-	println("----------------------")
-
-	return c.JSON(http.StatusOK, map[string]interface{}{
-		"products": filteredProducts,
-	})
+    return c.JSON(http.StatusOK, map[string]interface{}{"products": products})
 }
 func GetCategories(c echo.Context) error {
 	categories := scraper.GetCategories()
@@ -212,19 +159,20 @@ func GetCategories(c echo.Context) error {
 }
 
 func GetProductByID(c echo.Context) error {
-	id := c.Param("id")
-	query := c.QueryParam("search")
-	category := c.QueryParam("category")
+    id := c.Param("id")
+    query := c.QueryParam("search")
+    category := c.QueryParam("category")
 
-	products := scrapeAllSources(query, category)
+    // Modifiez ici pour utiliser le préfixe scraper.
+    products := scraper.ScrapeAllSources(query, category)
 
-	for _, product := range products {
-		if product.ID == id {
-			return c.JSON(http.StatusOK, product)
-		}
-	}
-
-	return c.JSON(http.StatusNotFound, map[string]string{
-		"error": "Produit non trouvé",
-	})
+    for _, product := range products {
+        if product.ID == id {
+            return c.JSON(http.StatusOK, product)
+        }
+    }
+    return c.JSON(http.StatusNotFound, map[string]string{"error": "Produit non trouvé"})
 }
+
+
+

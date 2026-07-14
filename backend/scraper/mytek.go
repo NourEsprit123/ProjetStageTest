@@ -56,7 +56,7 @@ func ScrapeMytekProducts(query string, category string) ([]models.Product, error
 		if err != nil {
 			// Si l'API échoue ou expire, on tente IMMÉDIATEMENT le plan B (Scraping HTML)
 			fmt.Printf("⚠️ [Mytek API] Échec API (Erreur: %v). Tentative de repli vers le scraping HTML...\n", err)
-			products, err = fetchMytekViaStaticParsing(client, searchQuery, page)
+			products, err = fetchMytekViaStaticParsing(client, searchQuery, category, page)
 			if err != nil {
 				fmt.Printf("❌ [Mytek HTML] Échec du repli HTML à la page %d: %v\n", page, err)
 				break
@@ -122,42 +122,59 @@ func fetchMytekAPIPage(client *http.Client, query string, category string, page 
 		return nil, err
 	}
 
-	for _, item := range data.Items {
-		p := models.Product{
-			ID:       fmt.Sprintf("mytek-%d", item.ID),
-			Name:     item.Name,
-			Price:    fmt.Sprintf("%.2f TND", item.Price),
-			InStock:  true,
-			Category: category,
-		}
+	if err := json.Unmarshal(body, &data); err != nil {
+    return nil, err
+}
 
-		for _, attr := range item.CustomAttributes {
-			if attr.AttributeCode == "image" {
-				if valStr, ok := attr.Value.(string); ok {
-					p.Image = "https://www.mytek.tn/media/catalog/product" + valStr
-				}
-			}
-			if attr.AttributeCode == "url_key" {
-				if valStr, ok := attr.Value.(string); ok {
-					p.URL = "https://www.mytek.tn/" + valStr + ".html"
-				}
-			}
-		}
-		
-		if p.Name != "" {
-			results = append(results, p)
-		}
-	}
+// 🔍 Debug temporaire — à retirer une fois confirmé
+if len(data.Items) > 0 {
+    raw, _ := json.MarshalIndent(data.Items[0].CustomAttributes, "", "  ")
+    fmt.Printf("[Mytek Debug] custom_attributes bruts du 1er produit (%s):\n%s\n", data.Items[0].Name, raw)
+}
+
+	for _, item := range data.Items {
+    p := models.Product{
+        ID:       fmt.Sprintf("mytek-%d", item.ID),
+        Name:     item.Name,
+        Price:    fmt.Sprintf("%.2f TND", item.Price),
+        Category: category,
+        Source:   "Mytek",
+        // InStock retiré d'ici — sera défini ci-dessous
+    }
+
+    for _, attr := range item.CustomAttributes {
+        if attr.AttributeCode == "image" {
+            if valStr, ok := attr.Value.(string); ok {
+                p.Image = "https://www.mytek.tn/media/catalog/product" + valStr
+            }
+        }
+        if attr.AttributeCode == "url_key" {
+            if valStr, ok := attr.Value.(string); ok {
+                p.URL = "https://www.mytek.tn/" + valStr + ".html"
+            }
+        }
+        if attr.AttributeCode == "quantity_and_stock_status" {
+            if valMap, ok := attr.Value.(map[string]interface{}); ok {
+                if inStock, ok := valMap["is_in_stock"].(bool); ok {
+                    p.InStock = inStock
+                }
+            }
+        }
+    }
+    
+    if p.Name != "" {
+        results = append(results, p)
+    }
+}
 
 	fmt.Printf("[Mytek API Debug] Extrait avec succès %d produits depuis l'API (Page %d).\n", len(results), page)
 	return results, nil
 }
 
 // 2. Implémentation du scraping HTML statique en cas de panne de l'API
-func fetchMytekViaStaticParsing(client *http.Client, term string, page int) ([]models.Product, error) {
+func fetchMytekViaStaticParsing(client *http.Client, term string, category string, page int) ([]models.Product, error) {
 	var results []models.Product
 	
-	// URL de recherche publique HTML standard (très rapide grâce au cache vernish du site)
 	searchURL := fmt.Sprintf("https://www.mytek.tn/catalogsearch/result/index/?q=%s&p=%d", url.QueryEscape(term), page)
 	
 	req, err := http.NewRequest("GET", searchURL, nil)
@@ -183,7 +200,6 @@ func fetchMytekViaStaticParsing(client *http.Client, term string, page int) ([]m
 		return nil, err
 	}
 
-	// Parsing des produits sur la page HTML standard de MyTek (Magento Luma Theme)
 	doc.Find("li.product-item").Each(func(i int, s *goquery.Selection) {
 		nameEl := s.Find(".product-item-link")
 		name := strings.TrimSpace(nameEl.Text())
@@ -201,7 +217,6 @@ func fetchMytekViaStaticParsing(client *http.Client, term string, page int) ([]m
 			imgURL, _ = imgEl.Attr("data-src")
 		}
 
-		// Extraction de l'ID depuis l'attribut data-product-id
 		id, _ := s.Find(".price-box").Attr("data-product-id")
 		if id == "" {
 			id = fmt.Sprintf("mytek-html-%d-%d", page, i)
@@ -216,8 +231,9 @@ func fetchMytekViaStaticParsing(client *http.Client, term string, page int) ([]m
 				Price:    price,
 				Image:    imgURL,
 				URL:      prodURL,
-				InStock:  true, // Par défaut dispo ou à affiner selon classe CSS
-				Category: "",
+				//InStock:  true,
+				Category: category,
+				Source:   "Mytek",
 			})
 		}
 	})

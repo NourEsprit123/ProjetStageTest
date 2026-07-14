@@ -9,11 +9,10 @@ type Product struct {
 	URL         string  `json:"url"`
 	Description string  `json:"description"`
 	InStock     bool    `json:"in_stock"`
+	Source      string  `json:"source"`   // 👈 ajouté : "Tunisianet", "Mytek", "Wiki.tn"
 }
 
 type SearchRequest struct {
 	Query    string `json:"query"`
 	Category string `json:"category"`
 }
-
-

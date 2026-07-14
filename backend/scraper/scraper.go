@@ -171,6 +171,7 @@ func scrapePageWithDoc(client *http.Client, pageURL string, category string) ([]
 
 		product.Price = strings.TrimSpace(s.Find(".price").First().Text())
 		product.Category = category
+		product.Source = "Tunisianet"
 
 		// Vérification basique de la disponibilité dans le DOM (optionnel selon le thème)
 		product.InStock = !strings.Contains(strings.ToLower(s.Text()), "hors stock")

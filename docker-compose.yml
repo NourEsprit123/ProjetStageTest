@@ -1,12 +1,33 @@
 version: '3.8'
 
 services:
+  tunisianet-db:
+    image: postgres:16
+    environment:
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=nour
+      - POSTGRES_DB=postgres
+    ports:
+      - "5433:5432"
+    volumes:
+      - db_data:/var/lib/postgresql/data
+      - ./db/init.sql:/docker-entrypoint-initdb.d/init.sql   # 👈 vérifie que ce chemin existe bien
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
   backend:
     build:
       context: ./backend
       dockerfile: Dockerfile
     ports:
       - "8080:8080"
+    depends_on:
+      tunisianet-db:
+        condition: service_healthy
     restart: unless-stopped
 
   frontend:
@@ -20,3 +41,6 @@ services:
     depends_on:
       - backend
     restart: unless-stopped
+
+volumes:
+  db_data:

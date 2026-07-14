@@ -159,6 +159,7 @@ func scrapeWikiPage(client *http.Client, pageURL string, category string) ([]mod
 		stockClass, _ := btn.Attr("class")
 		product.InStock = !strings.Contains(stockClass, "outofstock")
 		product.Category = category
+		product.Source = "Wiki.tn"
 
 		// Debug du 1er produit
 		if i == 0 {
