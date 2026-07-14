@@ -31,16 +31,13 @@ export default function Home() {
 
   // 👈 AJOUTEZ LE useEffect ICI
   useEffect(() => {
-    const delayDebounceFn = setTimeout(() => {
-      if (search.length > 2) { 
-        handleSearch();
-      } else if (search === "") {
-        setAllProducts([]);
-      }
-    }, 500);
-
-    return () => clearTimeout(delayDebounceFn);
-  }, [search, category]);
+  // Suppression du setTimeout pour une exécution instantanée
+  if (search.length >= 3) {
+    handleSearch();
+  } else if (search === "") {
+    setAllProducts([]); 
+  }
+}, [search, category]);
 
  const categories = [
     { value: 'informatique', label: 'Informatique' },

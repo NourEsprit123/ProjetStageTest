@@ -70,13 +70,13 @@ func GetProductsFromDB(search, category string) ([]models.Product, error) {
     // Filtre recherche optimisé
     if search != "" {
         // Utilise tsvector pour la pertinence linguistique et le % pour la similarité (fautes de frappe)
-        query += fmt.Sprintf(` AND (to_tsvector('french', name) @@ plainto_tsquery('french', $%d) 
-                              OR name %% $%d)`, argCount, argCount)
+       query += fmt.Sprintf(` AND (to_tsvector('french', name) @@ phraseto_tsquery('french', $%d) 
+                      OR name %% $%d)`, argCount, argCount)
         args = append(args, search)
         argCount++
         
         // Ajout du tri par pertinence (ts_rank) avant la limite
-        query += fmt.Sprintf(" ORDER BY ts_rank(to_tsvector('french', name), plainto_tsquery('french', $%d)) DESC", argCount-1)
+        query += fmt.Sprintf(" ORDER BY ts_rank(to_tsvector('french', name), phraseto_tsquery('french', $%d)) DESC", argCount-1)
     } else {
         query += " ORDER BY created_at DESC"
     }
