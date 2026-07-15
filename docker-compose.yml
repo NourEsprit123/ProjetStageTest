@@ -11,13 +11,25 @@ services:
       - "5433:5432"
     volumes:
       - db_data:/var/lib/postgresql/data
-      - ./db/init.sql:/docker-entrypoint-initdb.d/init.sql   # 👈 vérifie que ce chemin existe bien
+      - ./db/init.sql:/docker-entrypoint-initdb.d/init.sql
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U postgres"]
       interval: 5s
       timeout: 5s
       retries: 5
     restart: unless-stopped
+    networks:
+      - app-network
+
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.13.0
+    environment:
+      - discovery.type=single-node
+      - xpack.security.enabled=false
+    ports:
+      - "9200:9200"
+    networks:
+      - app-network
 
   backend:
     build:
@@ -25,10 +37,16 @@ services:
       dockerfile: Dockerfile
     ports:
       - "8080:8080"
+    environment:
+      - ES_URL=http://elasticsearch:9200
     depends_on:
       tunisianet-db:
         condition: service_healthy
+      elasticsearch:
+        condition: service_started
     restart: unless-stopped
+    networks:
+      - app-network
 
   frontend:
     build:
@@ -41,6 +59,12 @@ services:
     depends_on:
       - backend
     restart: unless-stopped
+    networks:
+      - app-network
 
 volumes:
   db_data:
+
+networks:
+  app-network:
+    driver: bridge

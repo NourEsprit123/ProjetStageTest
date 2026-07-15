@@ -122,9 +122,6 @@ func fetchMytekAPIPage(client *http.Client, query string, category string, page 
 		return nil, err
 	}
 
-	if err := json.Unmarshal(body, &data); err != nil {
-    return nil, err
-}
 
 // 🔍 Debug temporaire — à retirer une fois confirmé
 if len(data.Items) > 0 {
@@ -132,42 +129,42 @@ if len(data.Items) > 0 {
     fmt.Printf("[Mytek Debug] custom_attributes bruts du 1er produit (%s):\n%s\n", data.Items[0].Name, raw)
 }
 
+
 	for _, item := range data.Items {
-    p := models.Product{
-        ID:       fmt.Sprintf("mytek-%d", item.ID),
-        Name:     item.Name,
-        Price:    fmt.Sprintf("%.2f TND", item.Price),
-        Category: category,
-        Source:   "Mytek",
-        // InStock retiré d'ici — sera défini ci-dessous
-    }
+		p := models.Product{
+			ID:       fmt.Sprintf("mytek-%d", item.ID),
+			Name:     item.Name,
+			Price:    fmt.Sprintf("%.2f TND", item.Price),
+			Category: category,
+			Source:   "Mytek",
+		}
 
-    for _, attr := range item.CustomAttributes {
-        if attr.AttributeCode == "image" {
-            if valStr, ok := attr.Value.(string); ok {
-                p.Image = "https://www.mytek.tn/media/catalog/product" + valStr
-            }
-        }
-        if attr.AttributeCode == "url_key" {
-            if valStr, ok := attr.Value.(string); ok {
-                p.URL = "https://www.mytek.tn/" + valStr + ".html"
-            }
-        }
-        if attr.AttributeCode == "quantity_and_stock_status" {
-            if valMap, ok := attr.Value.(map[string]interface{}); ok {
-                if inStock, ok := valMap["is_in_stock"].(bool); ok {
-                    p.InStock = inStock
-                }
-            }
-        }
-    }
-    
-    if p.Name != "" {
-        results = append(results, p)
-    }
-}
+		for _, attr := range item.CustomAttributes {
+			if attr.AttributeCode == "image" {
+				if valStr, ok := attr.Value.(string); ok {
+					p.Image = "https://www.mytek.tn/media/catalog/product" + valStr
+				}
+			}
+			if attr.AttributeCode == "url_key" {
+				if valStr, ok := attr.Value.(string); ok {
+					p.URL = "https://www.mytek.tn/" + valStr + ".html"
+				}
+			}
+			if attr.AttributeCode == "quantity_and_stock_status" {
+				if valMap, ok := attr.Value.(map[string]interface{}); ok {
+					if inStock, ok := valMap["is_in_stock"].(bool); ok {
+						p.InStock = inStock
+					}
+				}
+			}
+		}
 
-	fmt.Printf("[Mytek API Debug] Extrait avec succès %d produits depuis l'API (Page %d).\n", len(results), page)
+		if p.Name != "" {
+			results = append(results, p)
+		}
+	}
+
+	fmt.Printf("[Mytek API Debug] Extrait %d produits (Page %d).\n", len(results), page)
 	return results, nil
 }
 

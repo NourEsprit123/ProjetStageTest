@@ -28,6 +28,24 @@ export default function Home() {
   const router = useRouter();
 
 
+const [scraping, setScraping] = useState(false);
+const [scrapeMessage, setScrapeMessage] = useState('');
+
+
+
+const handleTriggerScraping = async () => {
+  setScraping(true);
+  setScrapeMessage('');
+  try {
+    const res = await fetch('http://localhost:8080/api/scrape', { method: 'POST' });
+    const data = await res.json();
+    setScrapeMessage(data.message || 'Scraping lancé.');
+  } catch {
+    setScrapeMessage('Erreur lors du déclenchement.');
+  } finally {
+    setScraping(false);
+  }
+};
 
   // 👈 AJOUTEZ LE useEffect ICI
   useEffect(() => {
@@ -94,9 +112,17 @@ const handleSearch = async () => {
 
   return (
     <main className="min-h-screen bg-gray-50">
-      <div className="bg-blue-700 text-white py-8 px-4 text-center">
-        <h1 className="text-3xl font-bold mb-2">🛍️ Multi-Source Scraper</h1>
-      </div>
+    <div className="bg-blue-700 text-white py-8 px-4 text-center">
+  <h1 className="text-3xl font-bold mb-2">🛍️ Multi-Source Scraper</h1>
+  <button
+    onClick={handleTriggerScraping}
+    disabled={scraping}
+    className="mt-2 bg-white text-blue-700 px-4 py-2 rounded-lg font-semibold disabled:opacity-50"
+  >
+    {scraping ? '⏳ Scraping en cours...' : '🔄 Lancer le scraping'}
+  </button>
+  {scrapeMessage && <p className="text-sm mt-2 text-blue-100">{scrapeMessage}</p>}
+</div>
 
       <div className="max-w-4xl mx-auto px-4 py-8">
         <div className="bg-white rounded-xl shadow p-6 flex flex-col gap-4">

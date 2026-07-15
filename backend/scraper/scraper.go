@@ -73,43 +73,38 @@ func ScrapeProducts(query string, category string) ([]models.Product, error) {
 	baseURL := buildURL(query, category)
 	client := getHTTPClient()
 
+	const maxPages = 30
+	var lastFirstProductID string
 	page := 1
-	for {
+
+	for page <= maxPages {
 		pageURL := addPageParam(baseURL, page)
 		fmt.Printf("📥 [Tunisianet] Scraping Page %d: %s\n", page, pageURL)
 
 		products, htmlDoc, err := scrapePageWithDoc(client, pageURL, category)
 		if err != nil {
-			// En cas d'erreur sur une page (ex: 404), on renvoie ce qu'on a déjà pour ne pas tout perdre
-			fmt.Printf("⚠️ [Tunisianet] Arrêt ou erreur à la page %d: %v\n", page, err)
+			fmt.Printf("⚠️ [Tunisianet] Arrêt à la page %d: %v\n", page, err)
 			return allProducts, nil
 		}
-
-		// Si la page ne contient aucun produit, on arrête la pagination
 		if len(products) == 0 {
-			fmt.Printf("🏁 [Tunisianet] Plus de produits trouvés. Fin à la page %d.\n", page)
+			fmt.Printf("🏁 [Tunisianet] Fin à la page %d.\n", page)
 			break
 		}
-
+		if products[0].ID == lastFirstProductID {
+			fmt.Printf("🛑 [Tunisianet] Pagination inefficace, arrêt à la page %d.\n", page)
+			break
+		}
+		lastFirstProductID = products[0].ID
 		allProducts = append(allProducts, products...)
 
-		// 🔍 CONDITION D'ARRÊT : On vérifie si le bouton "Suivant" est présent sur la page.
-		// PrestaShop utilise généralement la classe 'a.next' ou l'attribut 'rel="next"'
-		hasNextPage := htmlDoc.Find("a.next, a[rel='next']").Length() > 0
-		if !hasNextPage {
-			fmt.Printf("🏁 [Tunisianet] Fin du catalogue atteinte naturellement à la page %d.\n", page)
+		if htmlDoc.Find("a.next, a[rel='next']").Length() == 0 {
 			break
 		}
-
 		page++
-		
-		// Pause de sécurité pour éviter d'être bloqué par le serveur
 		time.Sleep(300 * time.Millisecond)
 	}
-
 	return allProducts, nil
 }
-
 // scrapePageWithDoc effectue la requête et extrait les données tout en retournant le document HTML complet pour analyse.
 func scrapePageWithDoc(client *http.Client, pageURL string, category string) ([]models.Product, *goquery.Document, error) {
 	var products []models.Product

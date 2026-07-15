@@ -1,17 +1,11 @@
 package scraper
 
 import (
-	"fmt"
-	"sync" // Nécessaire pour l'erreur "undefined: sync"
-	"tunisianet-scraper/db"
-	"tunisianet-scraper/models" // Nécessaire pour l'erreur "undefined: models"
-
+	"sync"
+	"tunisianet-scraper/models"
 )
 
-
-
-
-// 💡 scrapeAllSources renvoie le flux brut accumulé sans filtrage prématuré
+// ScrapeAllSources lance les 3 scrapers en parallèle et agrège les résultats bruts
 func ScrapeAllSources(query string, category string) []models.Product {
 	var allProducts []models.Product
 	var mu sync.Mutex
@@ -19,7 +13,6 @@ func ScrapeAllSources(query string, category string) []models.Product {
 
 	wg.Add(3)
 
-	// --- TUNISIANET ---
 	go func() {
 		defer wg.Done()
 		products, err := ScrapeProducts(query, category)
@@ -30,7 +23,6 @@ func ScrapeAllSources(query string, category string) []models.Product {
 		}
 	}()
 
-	// --- MYTEK ---
 	go func() {
 		defer wg.Done()
 		products, err := ScrapeMytekProducts(query, category)
@@ -41,7 +33,6 @@ func ScrapeAllSources(query string, category string) []models.Product {
 		}
 	}()
 
-	// --- WIKI ---
 	go func() {
 		defer wg.Done()
 		products, err := ScrapeWikiProducts(query, category)
@@ -54,21 +45,4 @@ func ScrapeAllSources(query string, category string) []models.Product {
 
 	wg.Wait()
 	return allProducts
-}
-
-// RunBackgroundUpdate scrappe les sources principales et met à jour la base
-func RunBackgroundUpdate() {
-	fmt.Println("🚀 Démarrage du rafraîchissement complet des données...")
-	
-	// On définit les catégories à mettre à jour
-	categories := []string{"informatique", "smartphones", "ordinateurs", "composants"}
-	
-	for _, cat := range categories {
-		// Scrape de chaque catégorie
-		products := ScrapeAllSources("", cat)
-		// Sauvegarde immédiate
-		db.SaveProducts(products)
-	}
-	
-	fmt.Println("✅ Mise à jour terminée avec succès.")
 }
